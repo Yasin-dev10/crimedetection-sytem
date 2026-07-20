@@ -27,10 +27,52 @@ const investigationCaseSchema = new mongoose.Schema(
         "investigating",
         "crime_case",
         "not_crime",
+        "false_report",
+        "misleading_information",
+        "malicious_report",
         "resolved",
         "archived",
       ],
       default: "pending",
+    },
+    /**
+     * Investigator flags a citizen submission as false / misleading / malicious.
+     * Admin must confirm before account sanctions are applied.
+     */
+    reportFlag: {
+      type: {
+        type: String,
+        enum: ["false_report", "misleading_information", "malicious_report"],
+      },
+      reason: { type: String, default: "" },
+      flaggedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+        default: null,
+      },
+      flaggedAt: { type: Date, default: null },
+      reviewStatus: {
+        type: String,
+        enum: ["pending", "confirmed", "rejected"],
+        default: null,
+      },
+      reviewedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+        default: null,
+      },
+      reviewedAt: { type: Date, default: null },
+      adminAction: {
+        type: String,
+        enum: ["none", "warning", "under_review", "suspended", "blocked"],
+        default: null,
+      },
+      adminNotes: { type: String, default: "" },
+      reportingUser: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+        default: null,
+      },
     },
     category: {
       type: String,
@@ -63,6 +105,16 @@ const investigationCaseSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       default: null,
+    },
+    /** When the investigator formally began work on this case */
+    investigationStartedAt: {
+      type: Date,
+      default: null,
+    },
+    /** Investigator findings / discoveries recorded during the investigation */
+    findings: {
+      type: String,
+      default: "",
     },
     notes: [caseNoteSchema],
     archived: {

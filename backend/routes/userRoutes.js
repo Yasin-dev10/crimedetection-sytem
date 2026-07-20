@@ -9,6 +9,7 @@ const {
   updateUser,
   deleteUser,
   deleteUserByEmail,
+  updateAccountStatus,
 } = require("../controllers/userController");
 
 const {
@@ -44,6 +45,8 @@ router.post(
   upload.single("profileImage"),
   createInvestigator
 );
+
+router.patch("/:id/account-status", protect, adminOnly, updateAccountStatus);
 
 router.patch(
   "/:id",

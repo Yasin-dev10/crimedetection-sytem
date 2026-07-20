@@ -36,6 +36,44 @@ const userSchema = new mongoose.Schema(
       default: "active",
     },
 
+    /** Cumulative false / malicious / misleading report flags (investigator) */
+    false_report_count: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+
+    is_flagged: {
+      type: Boolean,
+      default: false,
+    },
+
+    flag_reason: {
+      type: String,
+      default: null,
+    },
+
+    flagged_by: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+
+    flagged_at: {
+      type: Date,
+      default: null,
+    },
+
+    /**
+     * Discipline status — only admin applies sanctions after reviewing investigator flags.
+     * Policy guide: 1=warning, 2=under_review, 3=suspended, 5+=blocked
+     */
+    account_status: {
+      type: String,
+      enum: ["active", "warning", "under_review", "suspended", "blocked"],
+      default: "active",
+    },
+
     theme: {
       type: String,
       enum: ["dark", "light"],

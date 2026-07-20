@@ -5,18 +5,38 @@ const activityLogSchema = new mongoose.Schema(
     user: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
-      required: true,
+      required: false,
+      default: null,
       index: true,
+    },
+    /** Display name snapshot (useful when user is deleted or login failed) */
+    userName: {
+      type: String,
+      default: null,
     },
     role: {
       type: String,
       default: null,
     },
-    // e.g. login, logout, case_created, case_assigned, case_claimed,
-    // case_updated, case_resolved, case_note_added
+    // e.g. login, logout, case_created, user_created, blacklist_entry_added
     action: {
       type: String,
       required: true,
+      index: true,
+    },
+    module: {
+      type: String,
+      default: null,
+      index: true,
+    },
+    description: {
+      type: String,
+      default: null,
+    },
+    status: {
+      type: String,
+      enum: ["success", "failed"],
+      default: "success",
       index: true,
     },
     sessionId: {
@@ -50,6 +70,9 @@ const activityLogSchema = new mongoose.Schema(
 activityLogSchema.index({ user: 1, createdAt: -1 });
 activityLogSchema.index({ user: 1, action: 1, createdAt: -1 });
 activityLogSchema.index({ action: 1, createdAt: -1 });
+activityLogSchema.index({ module: 1, createdAt: -1 });
+activityLogSchema.index({ status: 1, createdAt: -1 });
+activityLogSchema.index({ createdAt: -1 });
 
 module.exports =
   mongoose.models.ActivityLog || mongoose.model("ActivityLog", activityLogSchema);

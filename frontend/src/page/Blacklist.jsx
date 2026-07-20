@@ -227,7 +227,7 @@ export default function Blacklist() {
     e.preventDefault();
 
     const url = form.value.trim();
-    const name = form.name.trim();
+    const name = form.name.trim() || getNameFromWebsiteUrl(url);
 
     if (!isAbsoluteHttpUrl(url)) {
       setError("Enter a valid absolute URL starting with http:// or https://");
@@ -235,7 +235,7 @@ export default function Blacklist() {
     }
 
     if (!name) {
-      setError("Website name is required");
+      setError("Could not derive a website name from this URL");
       return;
     }
 
@@ -452,7 +452,7 @@ export default function Blacklist() {
 
             <button
               type="button"
-              onClick={() => navigate("/blacklist/fake-crimes")}
+              onClick={() => navigate("/blacklist/fake-crimes?tab=flags")}
               className="inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold text-white transition-opacity hover:opacity-90"
               style={{
                 background: "var(--navy)",
@@ -460,7 +460,7 @@ export default function Blacklist() {
               }}
             >
               <FileWarning size={16} />
-              Fake Crimes
+              Fake Crimes & Flags
             </button>
 
             {(view === "facebook" || view === "website") && (
@@ -673,7 +673,7 @@ export default function Blacklist() {
                     Add Website
                   </h2>
                   <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>
-                    Register an absolute http(s) URL to monitor for crime-related pages.
+                    Paste a website URL — the name is filled automatically.
                   </p>
                 </div>
               </div>
@@ -683,16 +683,24 @@ export default function Blacklist() {
                   label="Website URL"
                   placeholder="https://example.com"
                   value={form.value}
-                  onChange={(value) => setForm({ ...form, value })}
+                  onChange={(value) => {
+                    setForm({
+                      ...form,
+                      value,
+                      name: isAbsoluteHttpUrl(value)
+                        ? getNameFromWebsiteUrl(value)
+                        : "",
+                    });
+                  }}
                   helperText="Must be an absolute URL starting with http:// or https://"
                 />
 
                 <Field
                   label="Website Name"
-                  placeholder="Site or page label"
+                  placeholder="Auto-filled from URL"
                   value={form.name}
-                  onChange={(value) => setForm({ ...form, name: value })}
-                  helperText="Required — enter a clear display name."
+                  readOnly
+                  helperText="Filled automatically from the website URL."
                 />
 
                 <Field
@@ -1966,5 +1974,23 @@ function isAbsoluteHttpUrl(value = "") {
     return url.protocol === "http:" || url.protocol === "https:";
   } catch {
     return false;
+  }
+}
+
+function getNameFromWebsiteUrl(value = "") {
+  try {
+    const url = new URL(String(value).trim());
+    if (url.protocol !== "http:" && url.protocol !== "https:") return "";
+
+    const host = url.hostname.replace(/^www\./i, "").toLowerCase();
+    if (!host) return "";
+
+    const baseLabel = host.split(".")[0] || host;
+    return baseLabel
+      .replace(/[-_]+/g, " ")
+      .replace(/\b\w/g, (char) => char.toUpperCase())
+      .trim();
+  } catch {
+    return "";
   }
 }

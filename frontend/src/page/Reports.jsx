@@ -5,7 +5,8 @@ import {
   AlertTriangle, ShieldCheck, Download, RefreshCw,
   Layers, ChevronDown, ShieldAlert, SlidersHorizontal, Check,
   FileText, FileSpreadsheet, ExternalLink, Activity, ChevronRight,
-  ShieldX, UserX, ChevronUp, UserRound,
+  ShieldX, UserX, ChevronUp, UserRound, ClipboardList,
+  LogIn, LogOut, Briefcase, CheckCircle2, Clock3, Users,
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis,
@@ -28,10 +29,21 @@ const BASE_REPORT_TYPES = [
 ];
 
 const ADMIN_REPORT_TYPES = [
+  { id: "crime-cases", label: "Crime Report", icon: Briefcase },
   { id: "investigator-activity", label: "Investigator Activity", icon: Activity },
 ];
 
+const CRIME_PERIOD_TYPES = [
+  { id: "daily", label: "Daily" },
+  { id: "weekly", label: "Weekly" },
+  { id: "monthly", label: "Monthly" },
+  { id: "yearly", label: "Yearly" },
+  { id: "custom", label: "Custom Range" },
+];
+
+/** Investigators only see reports of their own work — never system-wide aggregates. */
 const INVESTIGATOR_REPORT_TYPES = [
+  { id: "my-work", label: "My Work Report", icon: ClipboardList },
   { id: "my-activity", label: "My Activity Report", icon: UserRound },
 ];
 
@@ -41,6 +53,10 @@ function isFakeCrimesReportType(type) {
 
 function isSelectionRequiredReport(type) {
   return type === "individual" || type === "fake-crimes-individual";
+}
+
+function isCrimeCasesReportType(type) {
+  return type === "crime-cases";
 }
 
 function todayLocalISO() {
@@ -55,6 +71,28 @@ function formatDateTime(value) {
   if (!value) return "—";
   const d = new Date(value);
   return Number.isNaN(d.getTime()) ? "—" : d.toLocaleString();
+}
+
+function formatDateTimeShort(value) {
+  if (!value) return "—";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function formatReportPeriodLabel(period) {
+  if (!period) return "—";
+  if (typeof period === "string") return period;
+  if (period.label) return period.label;
+  if (period.from || period.to) {
+    return `${period.from || ""} → ${period.to || ""}`.trim();
+  }
+  return "—";
 }
 
 function formatActionLabel(action) {
@@ -141,13 +179,15 @@ export default function Reports() {
   const REPORT_TYPES = useMemo(
     () => {
       if (isAdmin) return [...BASE_REPORT_TYPES, ...ADMIN_REPORT_TYPES];
-      if (isInvestigator) return [...BASE_REPORT_TYPES, ...INVESTIGATOR_REPORT_TYPES];
-      return BASE_REPORT_TYPES;
+      if (isInvestigator) return INVESTIGATOR_REPORT_TYPES;
+      return [];
     },
     [isAdmin, isInvestigator]
   );
 
-  const [activeType, setActiveType]   = useState("general");
+  const [activeType, setActiveType]   = useState(() =>
+    storedUser?.role === "investigator" ? "my-work" : "general"
+  );
   const [report,     setReport]       = useState(null);
   const [loading,    setLoading]      = useState(false);
   const [error,      setError]        = useState("");
@@ -159,6 +199,10 @@ export default function Reports() {
   const [selMonth, setSelMonth] = useState(currentMonth);
   const [weekFrom, setWeekFrom] = useState("");
   const [weekTo,   setWeekTo]   = useState("");
+  const [crimePeriod, setCrimePeriod] = useState("monthly");
+  const [crimeDate, setCrimeDate] = useState(todayLocalISO);
+  const [crimeFrom, setCrimeFrom] = useState("");
+  const [crimeTo, setCrimeTo] = useState("");
   const [activityFrom, setActivityFrom] = useState(todayLocalISO);
   const [activityTo, setActivityTo] = useState(todayLocalISO);
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -167,11 +211,19 @@ export default function Reports() {
   const downloadRef = useRef(null);
 
   useEffect(() => {
-    if (!isAdmin && activeType === "investigator-activity") {
+    if (isInvestigator) {
+      const allowed = new Set(INVESTIGATOR_REPORT_TYPES.map((r) => r.id));
+      if (!allowed.has(activeType)) {
+        setActiveType("my-work");
+        setReport(null);
+      }
+      return;
+    }
+    if (!isAdmin && (activeType === "investigator-activity" || activeType === "crime-cases")) {
       setActiveType("general");
       setReport(null);
     }
-  }, [isAdmin, activeType]);
+  }, [isAdmin, isInvestigator, activeType]);
 
   useEffect(() => {
     if (!filtersOpen && !downloadOpen) return undefined;
@@ -213,6 +265,97 @@ export default function Reports() {
     setLoading(true);
     setReport(null);
     try {
+      if (activeType === "my-work") {
+        if (!isInvestigator) {
+          setError("My Work report is available to investigator accounts only.");
+          setLoading(false);
+          return;
+        }
+        const res = await API.get("/reports/my-work");
+        setReport(res.data);
+        return;
+      }
+
+      if (activeType === "crime-cases") {
+        if (!isAdmin) {
+          setError("Crime reports are available to admins only.");
+          setLoading(false);
+          return;
+        }
+        const params = new URLSearchParams();
+        params.set("period", crimePeriod);
+        const today = todayLocalISO();
+
+        if (crimePeriod === "daily") {
+          if (!crimeDate) {
+            setError("Please select a date for the daily report.");
+            setLoading(false);
+            return;
+          }
+          if (crimeDate > today) {
+            setError("Cannot generate a report for a future date.");
+            setLoading(false);
+            return;
+          }
+          params.set("date", crimeDate);
+        } else if (crimePeriod === "weekly") {
+          if ((crimeFrom && !crimeTo) || (!crimeFrom && crimeTo)) {
+            setError("Please provide both a start date and an end date for the weekly report.");
+            setLoading(false);
+            return;
+          }
+          if (crimeFrom && crimeTo) {
+            if (crimeFrom > crimeTo) {
+              setError("Start date cannot be after end date.");
+              setLoading(false);
+              return;
+            }
+            if (crimeTo > today) {
+              setError("End date cannot be in the future.");
+              setLoading(false);
+              return;
+            }
+            const from = new Date(crimeFrom);
+            const to = new Date(crimeTo);
+            const diffDays = Math.round((to - from) / (1000 * 60 * 60 * 24)) + 1;
+            if (diffDays > 7) {
+              setError("Weekly report range cannot exceed 7 days.");
+              setLoading(false);
+              return;
+            }
+            params.set("from", crimeFrom);
+            params.set("to", crimeTo);
+          }
+        } else if (crimePeriod === "monthly") {
+          params.set("year", String(selYear));
+          params.set("month", String(selMonth));
+        } else if (crimePeriod === "yearly") {
+          params.set("year", String(selYear));
+        } else if (crimePeriod === "custom") {
+          if (!crimeFrom || !crimeTo) {
+            setError("Custom range requires both a start date and an end date.");
+            setLoading(false);
+            return;
+          }
+          if (crimeFrom > crimeTo) {
+            setError("Start date cannot be after end date.");
+            setLoading(false);
+            return;
+          }
+          if (crimeTo > today) {
+            setError("End date cannot be in the future.");
+            setLoading(false);
+            return;
+          }
+          params.set("from", crimeFrom);
+          params.set("to", crimeTo);
+        }
+
+        const res = await API.get(`/reports/crime-cases?${params}`);
+        setReport(res.data);
+        return;
+      }
+
       if (activeType === "investigator-activity" || activeType === "my-activity") {
         if (activeType === "investigator-activity" && !isAdmin) {
           setError("Investigator activity reports are available to admins only.");
@@ -374,10 +517,14 @@ export default function Reports() {
     } finally {
       setLoading(false);
     }
-  }, [activeType, selectedBlacklistId, selectedSource, selYear, selMonth, weekFrom, weekTo, activityFrom, activityTo, isAdmin, isInvestigator]);
+  }, [activeType, selectedBlacklistId, selectedSource, selYear, selMonth, weekFrom, weekTo, activityFrom, activityTo, crimePeriod, crimeDate, crimeFrom, crimeTo, isAdmin, isInvestigator]);
 
   useEffect(() => {
     if (isSelectionRequiredReport(activeType)) {
+      setReport(null);
+      return;
+    }
+    if (isCrimeCasesReportType(activeType)) {
       setReport(null);
       return;
     }
@@ -619,6 +766,135 @@ export default function Reports() {
                   </div>
                 )}
 
+                {activeType === "crime-cases" && (
+                  <div className="mb-3 space-y-3">
+                    <div>
+                      <p className="mb-1.5 text-[11px] font-bold uppercase tracking-wider" style={{ color: t.muted }}>
+                        Date filter
+                      </p>
+                      <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
+                        {CRIME_PERIOD_TYPES.map((p) => {
+                          const active = crimePeriod === p.id;
+                          return (
+                            <button
+                              key={p.id}
+                              type="button"
+                              onClick={() => {
+                                setCrimePeriod(p.id);
+                                setReport(null);
+                              }}
+                              className="rounded-xl border px-2 py-2 text-xs font-semibold transition"
+                              style={{
+                                backgroundColor: active ? t.brand : t.elevated,
+                                borderColor: active ? t.brand : t.border,
+                                color: active ? "#ffffff" : t.secondary,
+                              }}
+                            >
+                              {p.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {crimePeriod === "daily" && (
+                      <div>
+                        <p className="mb-1.5 text-[11px] font-bold uppercase tracking-wider" style={{ color: t.muted }}>Date</p>
+                        <input
+                          type="date"
+                          value={crimeDate}
+                          max={todayLocalISO()}
+                          onChange={(e) => setCrimeDate(e.target.value)}
+                          className="w-full rounded-xl border px-3 py-2.5 text-sm focus:outline-none"
+                          style={fieldStyle}
+                        />
+                      </div>
+                    )}
+
+                    {(crimePeriod === "weekly" || crimePeriod === "custom") && (
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <p className="mb-1.5 text-[11px] font-bold uppercase tracking-wider" style={{ color: t.muted }}>
+                            {crimePeriod === "weekly" ? "From (optional)" : "From"}
+                          </p>
+                          <input
+                            type="date"
+                            value={crimeFrom}
+                            max={crimeTo || todayLocalISO()}
+                            onChange={(e) => setCrimeFrom(e.target.value)}
+                            className="w-full rounded-xl border px-3 py-2.5 text-sm focus:outline-none"
+                            style={fieldStyle}
+                          />
+                        </div>
+                        <div>
+                          <p className="mb-1.5 text-[11px] font-bold uppercase tracking-wider" style={{ color: t.muted }}>
+                            {crimePeriod === "weekly" ? "To (optional)" : "To"}
+                          </p>
+                          <input
+                            type="date"
+                            value={crimeTo}
+                            min={crimeFrom || undefined}
+                            max={todayLocalISO()}
+                            onChange={(e) => setCrimeTo(e.target.value)}
+                            className="w-full rounded-xl border px-3 py-2.5 text-sm focus:outline-none"
+                            style={fieldStyle}
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    {crimePeriod === "monthly" && (
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <p className="mb-1.5 text-[11px] font-bold uppercase tracking-wider" style={{ color: t.muted }}>Year</p>
+                          <div className="relative">
+                            <select
+                              value={selYear}
+                              onChange={(e) => setSelYear(+e.target.value)}
+                              className="w-full appearance-none rounded-xl border px-3 py-2.5 pr-8 text-sm focus:outline-none"
+                              style={fieldStyle}
+                            >
+                              {YEARS.map((y) => <option key={y} value={y}>{y}</option>)}
+                            </select>
+                            <ChevronDown size={14} className="pointer-events-none absolute right-2.5 top-3.5" style={{ color: t.muted }} />
+                          </div>
+                        </div>
+                        <div>
+                          <p className="mb-1.5 text-[11px] font-bold uppercase tracking-wider" style={{ color: t.muted }}>Month</p>
+                          <div className="relative">
+                            <select
+                              value={selMonth}
+                              onChange={(e) => setSelMonth(+e.target.value)}
+                              className="w-full appearance-none rounded-xl border px-3 py-2.5 pr-8 text-sm focus:outline-none"
+                              style={fieldStyle}
+                            >
+                              {MONTHS.map((m) => <option key={m.v} value={m.v}>{m.l}</option>)}
+                            </select>
+                            <ChevronDown size={14} className="pointer-events-none absolute right-2.5 top-3.5" style={{ color: t.muted }} />
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {crimePeriod === "yearly" && (
+                      <div>
+                        <p className="mb-1.5 text-[11px] font-bold uppercase tracking-wider" style={{ color: t.muted }}>Year</p>
+                        <div className="relative">
+                          <select
+                            value={selYear}
+                            onChange={(e) => setSelYear(+e.target.value)}
+                            className="w-full appearance-none rounded-xl border px-3 py-2.5 pr-8 text-sm focus:outline-none"
+                            style={fieldStyle}
+                          >
+                            {YEARS.map((y) => <option key={y} value={y}>{y}</option>)}
+                          </select>
+                          <ChevronDown size={14} className="pointer-events-none absolute right-2.5 top-3.5" style={{ color: t.muted }} />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {(activeType === "investigator-activity" || activeType === "my-activity") && (
                   <div className="mb-3 grid grid-cols-2 gap-2">
                     <div>
@@ -701,35 +977,22 @@ export default function Reports() {
                   boxShadow: t.tooltipShadow,
                 }}
               >
-                {report.reportType === "investigator-activity" ? (
+                {[
+                  { label: "Export PDF", icon: FileText, action: exportReportPDF },
+                  { label: "Export Excel", icon: FileSpreadsheet, action: exportReportExcel },
+                  { label: "Export CSV", icon: Download, action: exportReportCSV },
+                ].map(({ label, icon: Icon, action }) => (
                   <button
+                    key={label}
                     type="button"
-                    onClick={() => { exportReportCSV(report); setDownloadOpen(false); }}
-                    title="Download investigator summary as CSV"
+                    onClick={() => { action(report); setDownloadOpen(false); }}
                     className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-sm font-semibold transition hover:opacity-80"
                     style={{ color: t.text }}
                   >
-                    <Download size={15} style={{ color: t.brand }} />
-                    CSV summary
+                    <Icon size={15} style={{ color: t.brand }} />
+                    {label}
                   </button>
-                ) : (
-                  [
-                    { label: "PDF", icon: FileText, action: exportReportPDF },
-                    { label: "Excel", icon: FileSpreadsheet, action: exportReportExcel },
-                    { label: "CSV", icon: Download, action: exportReportCSV },
-                  ].map(({ label, icon: Icon, action }) => (
-                    <button
-                      key={label}
-                      type="button"
-                      onClick={() => { action(report); setDownloadOpen(false); }}
-                      className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-sm font-semibold transition hover:opacity-80"
-                      style={{ color: t.text }}
-                    >
-                      <Icon size={15} style={{ color: t.brand }} />
-                      {label}
-                    </button>
-                  ))
-                )}
+                ))}
               </div>
             )}
           </div>
@@ -751,12 +1014,22 @@ export default function Reports() {
         <InvestigatorActivityReport t={t} report={report} />
       )}
 
+      {!loading && report && report.reportType === "my-work" && (
+        <MyWorkReport t={t} report={report} />
+      )}
+
+      {!loading && report && report.reportType === "crime-cases" && (
+        <CrimeCasesReport t={t} report={report} />
+      )}
+
       {!loading && report && isFakeCrimesReportType(report.reportType) && (
         <FakeCrimesReport t={t} report={report} />
       )}
 
       {!loading && report
         && report.reportType !== "investigator-activity"
+        && report.reportType !== "my-work"
+        && report.reportType !== "crime-cases"
         && !isFakeCrimesReportType(report.reportType) && (
         <div className="space-y-6">
           <div
@@ -1205,10 +1478,223 @@ function FakeCrimeEvidenceCard({ t, entry }) {
   );
 }
 
+function MyWorkReport({ t, report }) {
+  const stats = report.stats || {};
+  const investigator = report.investigator || {};
+  const cases = report.cases || [];
+  const formalReports = report.investigationReports || [];
+
+  return (
+    <div className="space-y-6">
+      <div
+        className="flex flex-col justify-between gap-4 rounded-2xl border p-5 sm:flex-row"
+        style={{ backgroundColor: t.card, borderColor: t.border, boxShadow: t.shadow }}
+      >
+        <div>
+          <div className="mb-1 flex items-center gap-2">
+            <ClipboardList size={18} style={{ color: t.brand }} />
+            <span className="text-xs font-bold uppercase tracking-widest" style={{ color: t.muted }}>
+              My work report
+            </span>
+          </div>
+          <h2 className="text-xl font-extrabold" style={{ color: t.text }}>
+            {investigator.name
+              ? `${investigator.name}'s investigation work`
+              : report.period}
+          </h2>
+          <p className="mt-1 text-sm" style={{ color: t.secondary }}>
+            Only cases and reports assigned to you — not system-wide totals.
+          </p>
+        </div>
+        <div className="self-end text-sm sm:self-start" style={{ color: t.muted }}>
+          Generated: {formatDateTime(report.generatedAt)}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-4">
+        <StatCard t={t} label="My Cases" value={stats.totalCases ?? 0} />
+        <StatCard t={t} label="Open" value={stats.open ?? 0} />
+        <StatCard t={t} label="Investigating" value={stats.investigating ?? 0} />
+        <StatCard t={t} label="Resolved" value={stats.resolved ?? 0} />
+        <StatCard t={t} label="Crime" value={stats.crime ?? 0} tone="danger" />
+        <StatCard t={t} label="Not Crime" value={stats.notCrime ?? 0} />
+        <StatCard t={t} label="My Formal Reports" value={stats.formalReports ?? 0} />
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+        <ChartCard t={t} title="My case outcomes">
+          <ResponsiveContainer height={240}>
+            <PieChart>
+              <Pie
+                data={[
+                  { name: "Crime", value: stats.crime || 0 },
+                  { name: "Not Crime", value: stats.notCrime || 0 },
+                  { name: "Open / Active", value: stats.open || 0 },
+                ]}
+                dataKey="value"
+                nameKey="name"
+                outerRadius={90}
+                innerRadius={52}
+                paddingAngle={4}
+                label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+              >
+                {[CHART_CRIME, t.brand, t.warn].map((c, i) => (
+                  <Cell key={i} fill={c} />
+                ))}
+              </Pie>
+              <Legend iconType="circle" wrapperStyle={{ color: t.secondary, fontSize: 12 }} />
+              <Tooltip
+                contentStyle={{
+                  background: t.card,
+                  border: `1px solid ${t.border}`,
+                  borderRadius: "12px",
+                  color: t.text,
+                }}
+              />
+            </PieChart>
+          </ResponsiveContainer>
+        </ChartCard>
+
+        <ChartCard t={t} title="My formal investigation reports">
+          {formalReports.length === 0 ? (
+            <p className="py-10 text-center text-sm" style={{ color: t.muted }}>
+              No formal reports yet. Create one from Case Details on an assigned case.
+            </p>
+          ) : (
+            <ul className="max-h-[240px] space-y-2 overflow-y-auto pr-1">
+              {formalReports.map((r) => (
+                <li
+                  key={r.id}
+                  className="rounded-xl border px-3 py-2.5"
+                  style={{ borderColor: t.border, backgroundColor: t.elevated }}
+                >
+                  <p className="text-sm font-semibold" style={{ color: t.text }}>
+                    {r.title}
+                  </p>
+                  <p className="mt-0.5 text-xs" style={{ color: t.muted }}>
+                    <span className="uppercase">{r.status}</span>
+                    {" · "}
+                    Updated {formatDateTime(r.updatedAt)}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          )}
+        </ChartCard>
+      </div>
+
+      <ChartCard t={t} title="My assigned cases">
+        {cases.length === 0 ? (
+          <p className="py-8 text-center text-sm" style={{ color: t.muted }}>
+            You have no assigned cases yet.
+          </p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-left text-sm">
+              <thead>
+                <tr style={{ borderBottom: `1px solid ${t.border}` }}>
+                  {["Case / Content", "Status", "Source / Link", "Resolution", "Updated"].map((h) => (
+                    <th
+                      key={h}
+                      className="whitespace-nowrap px-3 py-2 text-[11px] font-bold uppercase tracking-wide"
+                      style={{ color: t.muted }}
+                    >
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {cases.map((c) => {
+                  const fullText = String(c.content || c.contentPreview || "").trim();
+                  const urlFromText = (fullText.match(/https?:\/\/[^\s"'<>]+/i) || [])[0] || "";
+                  const postUrl = String(c.url || "").trim() || urlFromText;
+                  const resolutionText = String(
+                    c.findings || c.recommendation || ""
+                  ).trim();
+
+                  return (
+                  <tr key={c.id} style={{ borderBottom: `1px solid ${t.border}` }}>
+                    <td className="max-w-md px-3 py-3 align-top">
+                      <Link
+                        to={`/cases?case=${c.id}`}
+                        className="font-semibold hover:underline"
+                        style={{ color: t.brand }}
+                      >
+                        #{String(c.id).slice(-6).toUpperCase()}
+                      </Link>
+                      <p
+                        className="mt-1 whitespace-pre-wrap break-words text-xs leading-relaxed"
+                        style={{ color: t.secondary }}
+                      >
+                        {fullText || "—"}
+                      </p>
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-3 align-top capitalize" style={{ color: t.secondary }}>
+                      {String(c.status || "").replace(/_/g, " ")}
+                    </td>
+                    <td className="max-w-[220px] px-3 py-3 align-top" style={{ color: t.secondary }}>
+                      <p className="text-xs capitalize">{c.source || "—"}</p>
+                      {postUrl ? (
+                        <a
+                          href={postUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="mt-1 inline-flex break-all text-xs font-semibold hover:underline"
+                          style={{ color: t.brand }}
+                          title={postUrl}
+                        >
+                          {postUrl}
+                        </a>
+                      ) : (
+                        <p className="mt-1 text-xs" style={{ color: t.muted }}>
+                          No post link
+                        </p>
+                      )}
+                    </td>
+                    <td className="max-w-xs px-3 py-3 align-top">
+                      {resolutionText ? (
+                        <div className="space-y-1 text-xs" style={{ color: t.secondary }}>
+                          {c.findings ? (
+                            <p className="whitespace-pre-wrap break-words">
+                              <span className="font-bold" style={{ color: t.muted }}>Findings: </span>
+                              {c.findings}
+                            </p>
+                          ) : null}
+                          {c.recommendation ? (
+                            <p className="whitespace-pre-wrap break-words">
+                              <span className="font-bold" style={{ color: t.muted }}>Recommendation: </span>
+                              {c.recommendation}
+                            </p>
+                          ) : null}
+                        </div>
+                      ) : (
+                        <span className="text-xs capitalize" style={{ color: t.muted }}>
+                          {String(c.status || "").replace(/_/g, " ") || "—"}
+                        </span>
+                      )}
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-3 align-top text-xs" style={{ color: t.muted }}>
+                      {formatDateTime(c.updatedAt)}
+                    </td>
+                  </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </ChartCard>
+    </div>
+  );
+}
+
 function InvestigatorActivityReport({ t, report }) {
   const [expanded, setExpanded] = useState(() => new Set());
   const investigators = report.investigators || [];
   const stats = report.stats || {};
+  const periodLabel = formatReportPeriodLabel(report.period);
+  const unresolvedCount = stats.unresolvedCases ?? 0;
 
   useEffect(() => {
     setExpanded(new Set());
@@ -1223,49 +1709,128 @@ function InvestigatorActivityReport({ t, report }) {
     });
   };
 
+  const summaryStats = [
+    {
+      label: "Investigators",
+      value: stats.investigators ?? investigators.length,
+      icon: Users,
+      tone: "primary",
+    },
+    {
+      label: "Total Cases",
+      value: stats.totalCases ?? 0,
+      icon: Briefcase,
+      tone: "primary",
+    },
+    {
+      label: "Resolved",
+      value: stats.resolvedCases ?? 0,
+      icon: CheckCircle2,
+      tone: "ok",
+    },
+    {
+      label: "Unresolved",
+      value: unresolvedCount,
+      icon: AlertTriangle,
+      tone: unresolvedCount > 0 ? "danger" : "muted",
+    },
+    {
+      label: "Resolved in Period",
+      value: stats.resolvedInPeriod ?? 0,
+      icon: Activity,
+      tone: "primary",
+    },
+    {
+      label: "Logged In",
+      value: stats.loggedInInPeriod ?? 0,
+      icon: LogIn,
+      tone: "primary",
+    },
+  ];
+
   return (
     <div className="space-y-6">
       <div
-        className="flex flex-col justify-between gap-4 rounded-2xl border p-5 sm:flex-row"
+        className="overflow-hidden rounded-2xl border"
         style={{ backgroundColor: t.card, borderColor: t.border, boxShadow: t.shadow }}
       >
-        <div>
-          <div className="mb-1 flex items-center gap-2">
-            <Activity size={18} style={{ color: t.brand }} />
-            <span className="text-xs font-bold uppercase tracking-widest" style={{ color: t.muted }}>
-              {report.reportScope === "self"
-                ? "My investigator activity report"
-                : "Investigator activity report"}
-            </span>
+        <div
+          className="border-b px-5 py-5 sm:px-6"
+          style={{
+            borderColor: t.border,
+            background: `linear-gradient(135deg, ${t.brandSoft} 0%, transparent 55%)`,
+          }}
+        >
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div className="min-w-0">
+              <div className="mb-2 flex items-center gap-2">
+                <span
+                  className="flex h-9 w-9 items-center justify-center rounded-xl"
+                  style={{ backgroundColor: t.brandSoft, color: t.brand }}
+                >
+                  <Activity size={18} />
+                </span>
+                <span className="text-xs font-bold uppercase tracking-widest" style={{ color: t.muted }}>
+                  {report.reportScope === "self"
+                    ? "My Activity Report"
+                    : "Investigator Activity Report"}
+                </span>
+              </div>
+              <h2 className="text-2xl font-extrabold tracking-tight" style={{ color: t.text }}>
+                {periodLabel}
+              </h2>
+              <p className="mt-2 text-sm" style={{ color: t.secondary }}>
+                Overview of investigator workload, case resolution, and session activity.
+              </p>
+            </div>
+            <div
+              className="shrink-0 rounded-xl border px-4 py-3 text-sm"
+              style={{ borderColor: t.border, backgroundColor: t.elevated, color: t.muted }}
+            >
+              <p className="text-[10px] font-bold uppercase tracking-wider">Generated</p>
+              <p className="mt-1 font-semibold tabular-nums" style={{ color: t.text }}>
+                {formatDateTime(report.generatedAt)}
+              </p>
+            </div>
           </div>
-          <h2 className="text-xl font-extrabold" style={{ color: t.text }}>
-            {report.period?.label || `${report.period?.from || ""} → ${report.period?.to || ""}`}
-          </h2>
         </div>
-        <div className="self-end text-sm sm:self-start" style={{ color: t.muted }}>
-          Generated: {formatDateTime(report.generatedAt)}
-        </div>
-      </div>
 
-      <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-6">
-        <StatCard t={t} label="Investigators" value={stats.investigators ?? investigators.length} />
-        <StatCard t={t} label="Total Cases" value={stats.totalCases ?? 0} />
-        <StatCard t={t} label="Resolved" value={stats.resolvedCases ?? 0} />
-        <StatCard t={t} label="Unresolved" value={stats.unresolvedCases ?? 0} tone="danger" />
-        <StatCard t={t} label="Resolved In Period" value={stats.resolvedInPeriod ?? 0} />
-        <StatCard t={t} label="Logged In In Period" value={stats.loggedInInPeriod ?? 0} />
+        <div className="grid grid-cols-2 gap-3 p-4 sm:grid-cols-3 sm:p-5 xl:grid-cols-6">
+          {summaryStats.map(({ label, value, icon: Icon, tone }) => (
+            <ActivityStatTile
+              key={label}
+              t={t}
+              label={label}
+              value={value}
+              icon={Icon}
+              tone={tone}
+            />
+          ))}
+        </div>
       </div>
 
       {investigators.length === 0 ? (
         <div
-          className="rounded-2xl border px-5 py-12 text-center"
+          className="rounded-2xl border px-5 py-14 text-center"
           style={{ backgroundColor: t.card, borderColor: t.border, boxShadow: t.shadow }}
         >
-          <p className="text-sm font-semibold" style={{ color: t.text }}>No investigators found for this period.</p>
+          <Users size={32} className="mx-auto mb-3 opacity-40" style={{ color: t.muted }} />
+          <p className="text-sm font-semibold" style={{ color: t.text }}>
+            No investigators found for this period.
+          </p>
           <p className="mt-1 text-xs" style={{ color: t.muted }}>Try a different date range.</p>
         </div>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-4">
+          <div className="flex items-center justify-between gap-3 px-1">
+            <p className="text-sm font-bold" style={{ color: t.text }}>
+              Investigators ({investigators.length})
+            </p>
+            <p className="text-xs" style={{ color: t.muted }}>
+              Expand a row to view sessions and activity log
+            </p>
+          </div>
+
           {investigators.map((inv) => {
             const key = inv.officerId || inv.email || inv.name;
             const isOpen = expanded.has(key);
@@ -1273,92 +1838,138 @@ function InvestigatorActivityReport({ t, report }) {
             const loginTimes = inv.loginTimes || [];
             const logoutTimes = inv.logoutTimes || [];
             const activities = inv.activities || [];
+            const invUnresolved = inv.unresolvedCases ?? 0;
+            const isActive = String(inv.status || "").toLowerCase() === "active";
 
             return (
               <div
                 key={key}
-                className="overflow-hidden rounded-2xl border"
-                style={{ backgroundColor: t.card, borderColor: t.border, boxShadow: t.shadow }}
+                className="overflow-hidden rounded-2xl border transition-shadow"
+                style={{
+                  backgroundColor: t.card,
+                  borderColor: isOpen ? t.brandRing : t.border,
+                  boxShadow: isOpen ? t.shadow : t.shadow,
+                }}
               >
                 <button
                   type="button"
                   onClick={() => toggle(key)}
                   aria-expanded={isOpen}
                   aria-controls={`investigator-detail-${key}`}
-                  className="flex w-full flex-col gap-3 p-4 text-left transition hover:opacity-95 sm:flex-row sm:items-center sm:justify-between"
+                  className="flex w-full flex-col gap-4 p-4 text-left transition hover:opacity-95 sm:p-5 lg:flex-row lg:items-center lg:justify-between"
                 >
                   <div className="flex min-w-0 items-start gap-3">
                     <span
-                      className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
+                      className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl"
                       style={{ backgroundColor: t.brandSoft, color: t.brand }}
                       aria-hidden="true"
                     >
                       <ChevronRight
-                        size={16}
+                        size={18}
                         className={`transition-transform duration-200 ${isOpen ? "rotate-90" : ""}`}
                       />
                     </span>
                     <div className="min-w-0">
-                      <p className="truncate text-sm font-bold" style={{ color: t.text }}>
-                        {inv.name || "Unnamed investigator"}
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="text-base font-bold" style={{ color: t.text }}>
+                          {inv.name || "Unnamed investigator"}
+                        </p>
+                        <StatusPill
+                          t={t}
+                          label={inv.status || "unknown"}
+                          tone={isActive ? "ok" : "muted"}
+                        />
+                      </div>
+                      <p className="mt-1 text-sm" style={{ color: t.secondary }}>
+                        Badge {inv.badgeNumber || "—"} · {inv.station || "No station"}
                       </p>
-                      <p className="mt-0.5 truncate text-xs" style={{ color: t.muted }}>
-                        Badge {inv.badgeNumber || "—"} · {inv.station || "No station"} ·{" "}
-                        <span className="capitalize">{inv.status || "unknown"}</span>
-                      </p>
+                      {inv.email && (
+                        <p className="mt-0.5 truncate text-xs" style={{ color: t.muted }}>
+                          {inv.email}
+                        </p>
+                      )}
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4 lg:grid-cols-7 sm:gap-3">
-                    <MetricChip t={t} label="Total" value={inv.totalCases ?? 0} />
-                    <MetricChip t={t} label="Resolved" value={inv.resolvedCases ?? 0} />
-                    <MetricChip t={t} label="Unresolved" value={inv.unresolvedCases ?? 0} />
-                    <MetricChip t={t} label="Resolved (period)" value={inv.resolvedInPeriod ?? 0} />
-                    <MetricChip
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:max-w-xl lg:shrink-0">
+                    <InlineStat t={t} label="Cases" value={inv.totalCases ?? 0} />
+                    <InlineStat t={t} label="Resolved" value={inv.resolvedCases ?? 0} tone="ok" />
+                    <InlineStat
                       t={t}
-                      label="Logged in"
-                      value={inv.loggedInInPeriod ? "Yes" : "No"}
-                      tone={inv.loggedInInPeriod ? "ok" : "muted"}
+                      label="Open"
+                      value={invUnresolved}
+                      tone={invUnresolved > 0 ? "danger" : "muted"}
                     />
-                    <MetricChip t={t} label="Last login" value={formatDateTime(inv.lastLoginAt)} wide />
-                    <MetricChip t={t} label="Activities" value={activityCount} />
+                    <InlineStat t={t} label="Activities" value={activityCount} />
                   </div>
                 </button>
 
                 {isOpen && (
                   <div
                     id={`investigator-detail-${key}`}
-                    className="space-y-4 border-t px-4 py-4 sm:px-5"
+                    className="space-y-5 border-t px-4 py-5 sm:px-5"
                     style={{ borderColor: t.border, backgroundColor: t.elevated }}
                   >
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <DetailList
+                    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                      <MiniDetailCard
                         t={t}
-                        title="Login times"
-                        emptyLabel="No logins recorded in this period."
-                        items={loginTimes.map((at, i) => ({
-                          key: `login-${i}`,
-                          primary: formatDateTime(at),
-                        }))}
+                        icon={CheckCircle2}
+                        label="Resolved in period"
+                        value={inv.resolvedInPeriod ?? 0}
                       />
-                      <DetailList
+                      <MiniDetailCard
                         t={t}
-                        title="Logout times"
+                        icon={LogIn}
+                        label="Logged in (period)"
+                        value={inv.loggedInInPeriod ? "Yes" : "No"}
+                        tone={inv.loggedInInPeriod ? "ok" : "muted"}
+                      />
+                      <MiniDetailCard
+                        t={t}
+                        icon={Clock3}
+                        label="Last login"
+                        value={formatDateTimeShort(inv.lastLoginAt)}
+                      />
+                      <MiniDetailCard
+                        t={t}
+                        icon={LogOut}
+                        label="Last logout"
+                        value={formatDateTimeShort(inv.lastLogoutAt)}
+                      />
+                    </div>
+
+                    <div className="grid gap-4 lg:grid-cols-2">
+                      <SessionPanel
+                        t={t}
+                        title="Login sessions"
+                        icon={LogIn}
+                        emptyLabel="No logins recorded in this period."
+                        times={loginTimes}
+                      />
+                      <SessionPanel
+                        t={t}
+                        title="Logout sessions"
+                        icon={LogOut}
                         emptyLabel="No logouts recorded in this period."
-                        items={logoutTimes.map((at, i) => ({
-                          key: `logout-${i}`,
-                          primary: formatDateTime(at),
-                        }))}
+                        times={logoutTimes}
                       />
                     </div>
 
                     <div>
-                      <p className="mb-2 text-[11px] font-bold uppercase tracking-wider" style={{ color: t.muted }}>
-                        Activity ({activityCount})
-                      </p>
+                      <div className="mb-3 flex items-center justify-between gap-2">
+                        <p className="text-xs font-bold uppercase tracking-wider" style={{ color: t.muted }}>
+                          Activity log
+                        </p>
+                        <span
+                          className="rounded-full px-2.5 py-1 text-[11px] font-bold tabular-nums"
+                          style={{ backgroundColor: t.brandSoft, color: t.brand }}
+                        >
+                          {activityCount} events
+                        </span>
+                      </div>
                       {activities.length === 0 ? (
                         <p
-                          className="rounded-xl border px-3 py-4 text-sm"
+                          className="rounded-xl border px-4 py-5 text-sm"
                           style={{ borderColor: t.border, backgroundColor: t.card, color: t.muted }}
                         >
                           No activity recorded for this investigator in the selected period.
@@ -1368,22 +1979,34 @@ function InvestigatorActivityReport({ t, report }) {
                           {activities.map((act, i) => (
                             <li
                               key={`${act.action}-${act.at}-${i}`}
-                              className="rounded-xl border px-3 py-2.5"
+                              className="relative rounded-xl border px-4 py-3 pl-5"
                               style={{ borderColor: t.border, backgroundColor: t.card }}
                             >
-                              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                              <span
+                                className="absolute bottom-3 left-2 top-3 w-0.5 rounded-full"
+                                style={{ backgroundColor: t.brandRing }}
+                                aria-hidden="true"
+                              />
+                              <div className="flex flex-wrap items-start justify-between gap-2">
                                 <span className="text-sm font-semibold" style={{ color: t.text }}>
                                   {formatActionLabel(act.action)}
                                 </span>
-                                <span className="text-xs tabular-nums" style={{ color: t.muted }}>
-                                  {formatDateTime(act.at)}
+                                <span
+                                  className="shrink-0 rounded-md px-2 py-0.5 text-[11px] font-medium tabular-nums"
+                                  style={{ backgroundColor: t.elevated, color: t.muted }}
+                                >
+                                  {formatDateTimeShort(act.at)}
                                 </span>
                               </div>
-                              <p className="mt-1 text-xs" style={{ color: t.secondary }}>
-                                {[act.resourceType, act.resourceId].filter(Boolean).join(" · ") || "No resource"}
-                              </p>
-                              {act.details != null && act.details !== "" && (
-                                <p className="mt-1 break-words text-xs" style={{ color: t.muted }}>
+                              {(act.description || act.resourceType || act.resourceId) && (
+                                <p className="mt-1.5 break-words text-sm leading-relaxed" style={{ color: t.secondary }}>
+                                  {act.description
+                                    || [act.resourceType, act.resourceId].filter(Boolean).join(" · ")
+                                    || "No resource"}
+                                </p>
+                              )}
+                              {!act.description && act.details != null && act.details !== "" && (
+                                <p className="mt-1.5 break-words text-xs leading-relaxed" style={{ color: t.muted }}>
                                   {typeof act.details === "string"
                                     ? act.details
                                     : JSON.stringify(act.details)}
@@ -1394,11 +2017,6 @@ function InvestigatorActivityReport({ t, report }) {
                         </ul>
                       )}
                     </div>
-
-                    <p className="text-xs" style={{ color: t.muted }}>
-                      Latest logout: {formatDateTime(inv.lastLogoutAt)}
-                      {inv.email ? ` · ${inv.email}` : ""}
-                    </p>
                   </div>
                 )}
               </div>
@@ -1410,50 +2028,291 @@ function InvestigatorActivityReport({ t, report }) {
   );
 }
 
-function MetricChip({ t, label, value, tone = "default", wide = false }) {
-  const valueColor =
-    tone === "ok" ? t.brand : tone === "muted" ? t.muted : t.text;
+function ActivityStatTile({ t, label, value, icon: Icon, tone = "primary" }) {
+  const toneStyles = {
+    primary: { bg: t.brandSoft, color: t.brand, value: t.text },
+    ok: { bg: "rgba(6, 182, 212, 0.12)", color: "#06b6d4", value: "#06b6d4" },
+    danger: { bg: t.dangerSoft, color: t.danger, value: t.danger },
+    muted: { bg: t.elevated, color: t.muted, value: t.text },
+  };
+  const style = toneStyles[tone] || toneStyles.primary;
+
   return (
     <div
-      className={`rounded-lg border px-2 py-1.5 ${wide ? "sm:col-span-2 lg:col-span-1" : ""}`}
-      style={{ borderColor: t.border, backgroundColor: t.elevated }}
+      className="rounded-xl border p-3"
+      style={{ borderColor: t.border, backgroundColor: t.card }}
     >
-      <p className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: t.muted }}>
-        {label}
-      </p>
-      <p className="mt-0.5 truncate text-xs font-bold tabular-nums" style={{ color: valueColor }}>
+      <div className="mb-2 flex items-center gap-2">
+        <span
+          className="flex h-7 w-7 items-center justify-center rounded-lg"
+          style={{ backgroundColor: style.bg, color: style.color }}
+        >
+          <Icon size={14} />
+        </span>
+        <p className="text-[10px] font-bold uppercase leading-tight tracking-wide" style={{ color: t.muted }}>
+          {label}
+        </p>
+      </div>
+      <p className="text-2xl font-extrabold tabular-nums" style={{ color: style.value }}>
         {value}
       </p>
     </div>
   );
 }
 
-function DetailList({ t, title, emptyLabel, items }) {
+function StatusPill({ t, label, tone = "muted" }) {
+  const isOk = tone === "ok";
   return (
-    <div>
-      <p className="mb-2 text-[11px] font-bold uppercase tracking-wider" style={{ color: t.muted }}>
-        {title}
+    <span
+      className="rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide"
+      style={{
+        backgroundColor: isOk ? "rgba(6, 182, 212, 0.12)" : t.elevated,
+        color: isOk ? "#06b6d4" : t.muted,
+        border: `1px solid ${isOk ? "rgba(6, 182, 212, 0.25)" : t.border}`,
+      }}
+    >
+      {label}
+    </span>
+  );
+}
+
+function InlineStat({ t, label, value, tone = "default" }) {
+  const valueColor =
+    tone === "ok" ? "#06b6d4" : tone === "danger" ? t.danger : tone === "muted" ? t.muted : t.text;
+  return (
+    <div
+      className="rounded-xl border px-3 py-2.5 text-center"
+      style={{ borderColor: t.border, backgroundColor: t.elevated }}
+    >
+      <p className="text-[10px] font-bold uppercase tracking-wide" style={{ color: t.muted }}>
+        {label}
       </p>
-      {items.length === 0 ? (
-        <p
-          className="rounded-xl border px-3 py-3 text-sm"
-          style={{ borderColor: t.border, backgroundColor: t.card, color: t.muted }}
-        >
-          {emptyLabel}
+      <p className="mt-1 text-lg font-extrabold tabular-nums" style={{ color: valueColor }}>
+        {value}
+      </p>
+    </div>
+  );
+}
+
+function MiniDetailCard({ t, icon: Icon, label, value, tone = "default" }) {
+  const valueColor =
+    tone === "ok" ? "#06b6d4" : tone === "muted" ? t.muted : t.text;
+  return (
+    <div
+      className="flex items-start gap-3 rounded-xl border px-3 py-3"
+      style={{ borderColor: t.border, backgroundColor: t.card }}
+    >
+      <span
+        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
+        style={{ backgroundColor: t.brandSoft, color: t.brand }}
+      >
+        <Icon size={15} />
+      </span>
+      <div className="min-w-0">
+        <p className="text-[10px] font-bold uppercase tracking-wide" style={{ color: t.muted }}>
+          {label}
         </p>
+        <p className="mt-1 break-words text-sm font-semibold tabular-nums" style={{ color: valueColor }}>
+          {value}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function SessionPanel({ t, title, icon: Icon, emptyLabel, times }) {
+  return (
+    <div
+      className="rounded-xl border p-4"
+      style={{ borderColor: t.border, backgroundColor: t.card }}
+    >
+      <div className="mb-3 flex items-center gap-2">
+        <span
+          className="flex h-7 w-7 items-center justify-center rounded-lg"
+          style={{ backgroundColor: t.brandSoft, color: t.brand }}
+        >
+          <Icon size={14} />
+        </span>
+        <p className="text-xs font-bold uppercase tracking-wider" style={{ color: t.muted }}>
+          {title}
+        </p>
+        <span
+          className="ml-auto rounded-full px-2 py-0.5 text-[10px] font-bold tabular-nums"
+          style={{ backgroundColor: t.elevated, color: t.secondary }}
+        >
+          {times.length}
+        </span>
+      </div>
+      {times.length === 0 ? (
+        <p className="text-sm" style={{ color: t.muted }}>{emptyLabel}</p>
       ) : (
-        <ul className="space-y-1.5">
-          {items.map((item) => (
-            <li
-              key={item.key}
-              className="rounded-lg border px-3 py-2 text-sm tabular-nums"
-              style={{ borderColor: t.border, backgroundColor: t.card, color: t.text }}
+        <div className="flex flex-wrap gap-2">
+          {times.map((at, i) => (
+            <span
+              key={`${title}-${i}`}
+              className="inline-flex items-center rounded-lg border px-2.5 py-1.5 text-xs font-medium tabular-nums"
+              style={{ borderColor: t.border, backgroundColor: t.elevated, color: t.text }}
             >
-              {item.primary}
-            </li>
+              {formatDateTime(at)}
+            </span>
           ))}
-        </ul>
+        </div>
       )}
+    </div>
+  );
+}
+
+function CrimeCasesReport({ t, report }) {
+  const stats = report.stats || {};
+  const cases = report.cases || [];
+  const statusBreakdown = report.statusBreakdown || [];
+
+  const summaryCards = [
+    { label: "Total Cases", value: stats.totalCases ?? 0, tone: "default" },
+    { label: "Confirmed Crimes", value: stats.confirmedCrimes ?? 0, tone: "danger" },
+    { label: "Under Investigation", value: stats.underInvestigation ?? 0, tone: "default" },
+    { label: "False Positives", value: stats.falsePositives ?? 0, tone: "default" },
+  ];
+
+  const exportActions = [
+    { label: "Export PDF", icon: FileText, action: exportReportPDF },
+    { label: "Export Excel", icon: FileSpreadsheet, action: exportReportExcel },
+    { label: "Export CSV", icon: Download, action: exportReportCSV },
+  ];
+
+  return (
+    <div className="space-y-6">
+      <div
+        className="flex flex-col justify-between gap-4 rounded-2xl border p-5 sm:flex-row sm:items-start"
+        style={{ backgroundColor: t.card, borderColor: t.border, boxShadow: t.shadow }}
+      >
+        <div>
+          <div className="mb-1 flex items-center gap-2">
+            <Briefcase size={18} style={{ color: t.brand }} />
+            <span className="text-xs font-bold uppercase tracking-widest" style={{ color: t.muted }}>
+              Crime report · {report.periodType || "period"}
+            </span>
+          </div>
+          <h2 className="text-xl font-extrabold" style={{ color: t.text }}>{report.period}</h2>
+          <p className="mt-1 text-sm" style={{ color: t.muted }}>
+            Generated: {report.generatedAt ? new Date(report.generatedAt).toLocaleString() : "—"}
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {exportActions.map(({ label, icon: Icon, action }) => (
+            <button
+              key={label}
+              type="button"
+              onClick={() => action(report)}
+              className="inline-flex h-[42px] items-center gap-2 rounded-xl px-4 text-sm font-bold text-white transition hover:opacity-90"
+              style={{ backgroundColor: t.brand }}
+            >
+              <Icon size={15} />
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+        {summaryCards.map(({ label, value, tone }) => (
+          <StatCard key={label} t={t} label={label} value={value} tone={tone} />
+        ))}
+      </div>
+
+      {(stats.resolved != null || stats.archived != null) && (
+        <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+          <StatCard t={t} label="Resolved" value={stats.resolved ?? 0} />
+          <StatCard t={t} label="Archived" value={stats.archived ?? 0} />
+        </div>
+      )}
+
+      {statusBreakdown.length > 0 && (
+        <div
+          className="overflow-hidden rounded-2xl border"
+          style={{ backgroundColor: t.card, borderColor: t.border, boxShadow: t.shadow }}
+        >
+          <div className="border-b px-5 py-3" style={{ borderColor: t.border }}>
+            <p className="text-xs font-bold uppercase tracking-wider" style={{ color: t.muted }}>
+              Status breakdown
+            </p>
+          </div>
+          <div className="divide-y" style={{ borderColor: t.border }}>
+            {statusBreakdown.map((row) => (
+              <div
+                key={row.status}
+                className="flex items-center justify-between px-5 py-3 text-sm"
+                style={{ borderColor: t.border }}
+              >
+                <span className="capitalize font-semibold" style={{ color: t.text }}>
+                  {String(row.status || "unknown").replace(/_/g, " ")}
+                </span>
+                <span className="tabular-nums font-bold" style={{ color: t.brand }}>
+                  {row.count}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div
+        className="overflow-hidden rounded-2xl border"
+        style={{ backgroundColor: t.card, borderColor: t.border, boxShadow: t.shadow }}
+      >
+        <div className="flex items-center justify-between border-b px-5 py-3" style={{ borderColor: t.border }}>
+          <p className="text-xs font-bold uppercase tracking-wider" style={{ color: t.muted }}>
+            Cases in period
+          </p>
+          <span className="text-xs font-bold tabular-nums" style={{ color: t.secondary }}>
+            {cases.length} shown
+          </span>
+        </div>
+        {cases.length === 0 ? (
+          <p className="px-5 py-10 text-center text-sm" style={{ color: t.muted }}>
+            No investigation cases found for this period.
+          </p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-left text-sm">
+              <thead>
+                <tr style={{ backgroundColor: t.elevated, color: t.muted }}>
+                  <th className="px-4 py-3 font-bold">Status</th>
+                  <th className="px-4 py-3 font-bold">Category</th>
+                  <th className="px-4 py-3 font-bold">Officer</th>
+                  <th className="px-4 py-3 font-bold">Source</th>
+                  <th className="px-4 py-3 font-bold">Created</th>
+                  <th className="px-4 py-3 font-bold">Content</th>
+                </tr>
+              </thead>
+              <tbody>
+                {cases.map((c) => (
+                  <tr key={c._id} className="border-t" style={{ borderColor: t.border }}>
+                    <td className="px-4 py-3 capitalize font-semibold" style={{ color: t.text }}>
+                      {String(c.status || "—").replace(/_/g, " ")}
+                    </td>
+                    <td className="px-4 py-3 capitalize" style={{ color: t.secondary }}>
+                      {c.category || "—"}
+                    </td>
+                    <td className="px-4 py-3" style={{ color: t.secondary }}>
+                      {c.assignedOfficer?.name || "Unassigned"}
+                    </td>
+                    <td className="px-4 py-3 capitalize" style={{ color: t.secondary }}>
+                      {c.history?.sourceType || "—"}
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap" style={{ color: t.muted }}>
+                      {formatDateTime(c.createdAt)}
+                    </td>
+                    <td className="max-w-xs truncate px-4 py-3" style={{ color: t.secondary }} title={c.history?.content || ""}>
+                      {c.history?.content || "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

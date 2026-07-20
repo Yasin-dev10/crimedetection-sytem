@@ -9,6 +9,17 @@ const {
   parseFakeCrimeThreshold,
   buildFakeCrimeSubjects,
 } = require("../services/fakeCrimeReportService");
+const { logActivity } = require("../utils/activityLogger");
+
+const logReportGenerated = async (req, reportType, extra = {}) => {
+  await logActivity({
+    req,
+    action: "report_generated",
+    details: { reportType, ...extra },
+  });
+};
+
+const { resolveHistoryPostUrl } = require("../utils/resolvePostUrl");
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -407,6 +418,11 @@ exports.individualReport = async (req, res) => {
       sourceMap[src] = (sourceMap[src] || 0) + 1;
     });
 
+    await logReportGenerated(req, "individual", {
+      blacklistId: blacklistItem._id?.toString(),
+      blacklistName: blacklistItem.name,
+    });
+
     res.json({
       reportType: "individual",
       period: `${blacklistItem.name || blacklistItem.value} Blacklist Report`,
@@ -505,6 +521,12 @@ exports.fakeCrimesReport = async (req, res) => {
       0
     );
 
+    await logReportGenerated(
+      req,
+      blacklistId ? "fake-crimes-individual" : "fake-crimes-full",
+      { threshold, blacklistId: blacklistId || null }
+    );
+
     res.json({
       reportType: blacklistId ? "fake-crimes-individual" : "fake-crimes-full",
       period: "All investigator-confirmed fake crimes",
@@ -585,6 +607,8 @@ exports.generalReport = async (req, res) => {
         itemFilter: blacklistItemFilterForSource(source),
       }),
     ]);
+
+    await logReportGenerated(req, "general", { source });
 
     res.json({
       reportType: "general",
@@ -710,6 +734,8 @@ exports.monthlyReport = async (req, res) => {
       month: "long",
     });
 
+    await logReportGenerated(req, "monthly", { year, month, source });
+
     res.json({
       reportType: "monthly",
       sourceFilter: source,
@@ -749,6 +775,19 @@ exports.monthlyReport = async (req, res) => {
 
 const RESOLVED_CASE_STATUSES = ["crime_case", "not_crime", "resolved"];
 const UNRESOLVED_CASE_STATUSES = ["pending", "investigating"];
+
+/** Actions that count as investigator work (exclude report/auth noise). */
+const INVESTIGATOR_WORK_ACTIONS = new Set([
+  "case_created",
+  "case_updated",
+  "case_assigned",
+  "case_claimed",
+  "case_status_changed",
+  "case_resolved",
+  "case_note_added",
+]);
+
+const SESSION_ACTIONS = new Set(["login", "logout"]);
 
 /** Parse YYYY-MM-DD (or ISO string) into a local start/end-of-day Date. */
 function parseReportDay(value, endOfDay) {
@@ -819,9 +858,12 @@ const handleInvestigatorActivityReport = async (
       ActivityLog.find({
         user: { $in: investigatorIds },
         createdAt: { $gte: start, $lte: end },
+        action: {
+          $nin: ["report_generated", "report_exported"],
+        },
       })
         .sort({ createdAt: 1 })
-        .select("user action createdAt resourceType resourceId details")
+        .select("user action createdAt resourceType resourceId details description module status")
         .lean(),
       // Most recent login/logout per investigator across all time
       ActivityLog.aggregate([
@@ -885,14 +927,20 @@ const handleInvestigatorActivityReport = async (
         .filter((log) => log.action === "logout")
         .map((log) => log.createdAt);
 
+      // Work timeline: case actions primarily; keep other non-session events
+      // (e.g. login_failed) but never report export/generate noise.
       const activities = officerLogs
-        .filter((log) => log.action !== "login" && log.action !== "logout")
+        .filter((log) => !SESSION_ACTIONS.has(log.action))
         .map((log) => ({
           action: log.action,
           at: log.createdAt,
           resourceType: log.resourceType || null,
           resourceId: log.resourceId || null,
+          description: log.description || null,
+          module: log.module || null,
+          status: log.status || "success",
           details: log.details || null,
+          isCaseWork: INVESTIGATOR_WORK_ACTIONS.has(log.action),
         }));
 
       return {
@@ -920,6 +968,10 @@ const handleInvestigatorActivityReport = async (
       (a, b) =>
         b.resolvedInPeriod - a.resolvedInPeriod || b.activityCount - a.activityCount
     );
+
+    await logReportGenerated(req, "investigator-activity", {
+      scope: ownOnly ? "self" : "all-investigators",
+    });
 
     res.json({
       reportType: "investigator-activity",
@@ -954,6 +1006,145 @@ exports.investigatorActivityReport = (req, res) =>
 
 exports.myInvestigatorActivityReport = (req, res) =>
   handleInvestigatorActivityReport(req, res, { ownOnly: true });
+
+/**
+ * GET /api/reports/my-work
+ * Investigator-only: stats + cases + formal reports for the logged-in officer.
+ */
+exports.myWorkReport = async (req, res) => {
+  try {
+    if (req.user?.role !== "investigator") {
+      return res.status(403).json({
+        message: "My Work report is available to investigator accounts only.",
+      });
+    }
+
+    const InvestigationReport = require("../model/InvestigationReport");
+    const officerId = req.user._id;
+
+    const [cases, formalReports] = await Promise.all([
+      InvestigationCase.find({ assignedOfficer: officerId })
+        .populate({
+          path: "history",
+          // full content + link fields needed for My Work table
+          select:
+            "content extractedText sourceType type url postId isCrime confidence prediction createdAt pageName authorName blacklistMatches",
+          populate: {
+            path: "blacklistMatches.item",
+            select: "type value name",
+          },
+        })
+        .sort({ updatedAt: -1 })
+        .lean(),
+      InvestigationReport.find({ investigator: officerId })
+        .populate({
+          path: "case",
+          select: "status category resolvedAt createdAt findings",
+        })
+        .sort({ updatedAt: -1 })
+        .lean(),
+    ]);
+
+    // Repair any cases whose history failed to populate (orphaned / missing ref)
+    const missingHistoryIds = cases
+      .filter((c) => c.history && !c.history.content && mongoose.Types.ObjectId.isValid(c.history))
+      .map((c) => c.history);
+    if (missingHistoryIds.length) {
+      const recovered = await History.find({ _id: { $in: missingHistoryIds } })
+        .select(
+          "content extractedText sourceType type url postId isCrime confidence prediction createdAt pageName authorName blacklistMatches"
+        )
+        .populate({ path: "blacklistMatches.item", select: "type value name" })
+        .lean();
+      const byId = Object.fromEntries(recovered.map((h) => [String(h._id), h]));
+      cases.forEach((c) => {
+        const key = String(c.history);
+        if (byId[key]) c.history = byId[key];
+      });
+    }
+
+    const stats = {
+      totalCases: cases.length,
+      pending: cases.filter((c) => c.status === "pending").length,
+      investigating: cases.filter((c) => c.status === "investigating").length,
+      crime: cases.filter((c) => c.status === "crime_case").length,
+      notCrime: cases.filter((c) => c.status === "not_crime").length,
+      resolved: cases.filter((c) =>
+        ["crime_case", "not_crime", "resolved"].includes(c.status)
+      ).length,
+      open: cases.filter((c) =>
+        ["pending", "investigating"].includes(c.status)
+      ).length,
+      formalReports: formalReports.length,
+    };
+
+    const caseRows = cases.slice(0, 40).map((c) => {
+      const formal = formalReports.find(
+        (r) => String(r.case?._id || r.case) === String(c._id)
+      );
+      const history = c.history && typeof c.history === "object" ? c.history : null;
+      const rawContent = String(
+        history?.content || history?.extractedText || ""
+      ).trim();
+      const url = resolveHistoryPostUrl(history);
+
+      return {
+        id: c._id,
+        status: c.status,
+        assignedAt: c.assignedAt,
+        investigationStartedAt: c.investigationStartedAt,
+        resolvedAt: c.resolvedAt,
+        source: history?.sourceType || history?.type || null,
+        content: rawContent,
+        // keep legacy key so older UIs still work
+        contentPreview: rawContent,
+        url,
+        pageName: history?.pageName || null,
+        authorName: history?.authorName || null,
+        findings: String(formal?.findings || c.findings || "").trim(),
+        recommendation: String(formal?.recommendation || "").trim(),
+        confidence: history?.confidence ?? null,
+        updatedAt: c.updatedAt,
+      };
+    });
+
+    const reportRows = formalReports.map((r) => ({
+      id: r._id,
+      title: r.title,
+      status: r.status,
+      findings: r.findings,
+      recommendation: r.recommendation,
+      caseId: r.case?._id || r.case,
+      caseStatus: r.case?.status || null,
+      createdAt: r.createdAt,
+      updatedAt: r.updatedAt,
+    }));
+
+    await logReportGenerated(req, "my-work", { cases: stats.totalCases });
+
+    res.json({
+      reportType: "my-work",
+      period: "Your assigned investigation work",
+      generatedAt: new Date(),
+      investigator: {
+        id: req.user._id,
+        name: req.user.name,
+        email: req.user.email,
+        badgeNumber: req.user.badgeNumber || null,
+        station: req.user.station || null,
+      },
+      stats,
+      cases: caseRows,
+      investigationReports: reportRows,
+    });
+  } catch (err) {
+    console.error("My work report error:", err);
+    res.status(500).json({
+      message: err.message || "My work report failed",
+      error: err.message,
+    });
+  }
+};
 
 // ─── Weekly Report ────────────────────────────────────────────────────────────
 // GET /api/reports/weekly   (last 7 days by default)
@@ -1086,6 +1277,8 @@ exports.weeklyReport = async (req, res) => {
       }
     });
 
+    await logReportGenerated(req, "weekly", { source });
+
     res.json({
       reportType: "weekly",
       sourceFilter: source,
@@ -1109,6 +1302,290 @@ exports.weeklyReport = async (req, res) => {
     console.error("Weekly report error:", err);
     res.status(err.status || 500).json({
       message: err.message || "Weekly report failed",
+      error: err.message,
+    });
+  }
+};
+
+// ─── Crime Cases Report (Admin date-filtered export) ─────────────────────────
+// GET /api/reports/crime-cases?period=daily&date=2026-07-20
+// GET /api/reports/crime-cases?period=weekly&from=&to=
+// GET /api/reports/crime-cases?period=monthly&year=2026&month=7
+// GET /api/reports/crime-cases?period=yearly&year=2026
+// GET /api/reports/crime-cases?period=custom&from=&to=
+
+function parseCrimeReportPeriod(query = {}) {
+  const now = new Date();
+  const period = String(query.period || "monthly").trim().toLowerCase();
+  const allowed = new Set(["daily", "weekly", "monthly", "yearly", "custom"]);
+  if (!allowed.has(period)) {
+    const err = new Error("Invalid period. Use daily, weekly, monthly, yearly, or custom.");
+    err.status = 400;
+    throw err;
+  }
+
+  const todayEnd = new Date();
+  todayEnd.setHours(23, 59, 59, 999);
+
+  if (period === "daily") {
+    const dateStr = String(query.date || "").trim();
+    if (!dateStr) {
+      const err = new Error("Daily report requires a date (YYYY-MM-DD).");
+      err.status = 400;
+      throw err;
+    }
+    const start = new Date(dateStr);
+    if (Number.isNaN(start.getTime())) {
+      const err = new Error("Invalid date format. Use YYYY-MM-DD.");
+      err.status = 400;
+      throw err;
+    }
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(start);
+    end.setHours(23, 59, 59, 999);
+    if (start > todayEnd) {
+      const err = new Error("Cannot generate a report for a future date.");
+      err.status = 400;
+      throw err;
+    }
+    return {
+      period,
+      start,
+      end,
+      label: start.toLocaleDateString("en-US", {
+        weekday: "long",
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+      }),
+    };
+  }
+
+  if (period === "weekly") {
+    let start;
+    let end;
+    if (query.from && query.to) {
+      start = new Date(query.from);
+      end = new Date(query.to);
+      end.setHours(23, 59, 59, 999);
+      if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+        const err = new Error("Invalid date format. Use YYYY-MM-DD.");
+        err.status = 400;
+        throw err;
+      }
+      start.setHours(0, 0, 0, 0);
+      if (start > end) {
+        const err = new Error("Start date cannot be after end date.");
+        err.status = 400;
+        throw err;
+      }
+      if (end > todayEnd) {
+        const err = new Error("End date cannot be in the future.");
+        err.status = 400;
+        throw err;
+      }
+      const diffDays = Math.round((end - start) / (1000 * 60 * 60 * 24)) + 1;
+      if (diffDays > 7) {
+        const err = new Error("Weekly report range cannot exceed 7 days.");
+        err.status = 400;
+        throw err;
+      }
+    } else {
+      end = new Date(todayEnd);
+      start = new Date();
+      start.setDate(start.getDate() - 6);
+      start.setHours(0, 0, 0, 0);
+    }
+    return {
+      period,
+      start,
+      end,
+      label: `${start.toISOString().slice(0, 10)} → ${end.toISOString().slice(0, 10)}`,
+    };
+  }
+
+  if (period === "monthly") {
+    const year = parseInt(query.year, 10) || now.getFullYear();
+    const month = parseInt(query.month, 10) || now.getMonth() + 1;
+    if (year < 2000 || year > now.getFullYear() + 1) {
+      const err = new Error(`Year must be between 2000 and ${now.getFullYear() + 1}.`);
+      err.status = 400;
+      throw err;
+    }
+    if (month < 1 || month > 12) {
+      const err = new Error("Month must be between 1 and 12.");
+      err.status = 400;
+      throw err;
+    }
+    const start = new Date(year, month - 1, 1);
+    const end = new Date(year, month, 0, 23, 59, 59, 999);
+    const thisMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    if (start > thisMonth) {
+      const err = new Error("Cannot generate a report for a future month.");
+      err.status = 400;
+      throw err;
+    }
+    const monthName = start.toLocaleString("en-US", { month: "long" });
+    return { period, start, end, label: `${monthName} ${year}`, year, month };
+  }
+
+  if (period === "yearly") {
+    const year = parseInt(query.year, 10) || now.getFullYear();
+    if (year < 2000 || year > now.getFullYear() + 1) {
+      const err = new Error(`Year must be between 2000 and ${now.getFullYear() + 1}.`);
+      err.status = 400;
+      throw err;
+    }
+    if (year > now.getFullYear()) {
+      const err = new Error("Cannot generate a report for a future year.");
+      err.status = 400;
+      throw err;
+    }
+    const start = new Date(year, 0, 1);
+    const end = new Date(year, 11, 31, 23, 59, 59, 999);
+    return { period, start, end, label: `Year ${year}`, year };
+  }
+
+  // custom
+  if (!query.from || !query.to) {
+    const err = new Error("Custom range requires both from and to dates (YYYY-MM-DD).");
+    err.status = 400;
+    throw err;
+  }
+  const start = new Date(query.from);
+  const end = new Date(query.to);
+  end.setHours(23, 59, 59, 999);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+    const err = new Error("Invalid date format. Use YYYY-MM-DD.");
+    err.status = 400;
+    throw err;
+  }
+  start.setHours(0, 0, 0, 0);
+  if (start > end) {
+    const err = new Error("Start date cannot be after end date.");
+    err.status = 400;
+    throw err;
+  }
+  if (end > todayEnd) {
+    const err = new Error("End date cannot be in the future.");
+    err.status = 400;
+    throw err;
+  }
+  return {
+    period,
+    start,
+    end,
+    label: `${start.toISOString().slice(0, 10)} → ${end.toISOString().slice(0, 10)}`,
+  };
+}
+
+exports.crimeCasesReport = async (req, res) => {
+  try {
+    const range = parseCrimeReportPeriod(req.query);
+    const dateFilter = { $gte: range.start, $lte: range.end };
+    const baseFilter = { createdAt: dateFilter };
+
+    const [
+      totalCases,
+      confirmedCrimes,
+      underInvestigation,
+      falsePositives,
+      resolved,
+      archived,
+      statusBreakdown,
+      cases,
+    ] = await Promise.all([
+      InvestigationCase.countDocuments(baseFilter),
+      InvestigationCase.countDocuments({ ...baseFilter, status: "crime_case" }),
+      InvestigationCase.countDocuments({
+        ...baseFilter,
+        status: { $in: ["pending", "investigating"] },
+      }),
+      InvestigationCase.countDocuments({ ...baseFilter, status: "not_crime" }),
+      InvestigationCase.countDocuments({ ...baseFilter, status: "resolved" }),
+      InvestigationCase.countDocuments({ ...baseFilter, status: "archived" }),
+      InvestigationCase.aggregate([
+        { $match: baseFilter },
+        { $group: { _id: "$status", count: { $sum: 1 } } },
+        { $sort: { count: -1 } },
+      ]),
+      InvestigationCase.find(baseFilter)
+        .sort({ createdAt: -1 })
+        .limit(500)
+        .populate("assignedOfficer", "name email badgeNumber")
+        .populate("resolvedBy", "name email badgeNumber")
+        .populate({
+          path: "history",
+          select:
+            "type sourceType content url prediction confidence isCrime matchedKeyword createdAt",
+        })
+        .lean(),
+    ]);
+
+    await logReportGenerated(req, "crime-cases", {
+      period: range.period,
+      label: range.label,
+    });
+
+    res.json({
+      reportType: "crime-cases",
+      periodType: range.period,
+      period: range.label,
+      from: range.start.toISOString(),
+      to: range.end.toISOString(),
+      generatedAt: new Date(),
+      stats: {
+        totalCases,
+        confirmedCrimes,
+        underInvestigation,
+        falsePositives,
+        resolved,
+        archived,
+      },
+      statusBreakdown: statusBreakdown.map((s) => ({
+        status: s._id || "unknown",
+        count: s.count,
+      })),
+      cases: cases.map((c) => ({
+        _id: c._id,
+        status: c.status,
+        category: c.category,
+        createdAt: c.createdAt,
+        resolvedAt: c.resolvedAt,
+        assignedOfficer: c.assignedOfficer
+          ? {
+              name: c.assignedOfficer.name,
+              email: c.assignedOfficer.email,
+              badgeNumber: c.assignedOfficer.badgeNumber,
+            }
+          : null,
+        resolvedBy: c.resolvedBy
+          ? {
+              name: c.resolvedBy.name,
+              email: c.resolvedBy.email,
+              badgeNumber: c.resolvedBy.badgeNumber,
+            }
+          : null,
+        history: c.history
+          ? {
+              _id: c.history._id,
+              type: c.history.type,
+              sourceType: c.history.sourceType,
+              content: (c.history.content || "").slice(0, 300),
+              url: c.history.url || null,
+              prediction: c.history.prediction,
+              confidence: c.history.confidence,
+              isCrime: c.history.isCrime,
+              matchedKeyword: c.history.matchedKeyword,
+              createdAt: c.history.createdAt,
+            }
+          : null,
+      })),
+    });
+  } catch (err) {
+    console.error("Crime cases report error:", err);
+    res.status(err.status || 500).json({
+      message: err.message || "Crime cases report failed",
       error: err.message,
     });
   }

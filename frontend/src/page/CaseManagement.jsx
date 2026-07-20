@@ -4,7 +4,9 @@ import {
   AlertTriangle,
   Archive,
   ClipboardList,
+  Download,
   Eye,
+  Flag,
   ShieldCheck,
   ShieldAlert,
   Trash2,
@@ -21,8 +23,24 @@ import {
 } from "lucide-react";
 import API from "../api";
 import { getStoredUser } from "../theme";
+import { exportInvestigationCasePDF } from "../utils/investigationReport";
 
 const ACTIVE_STATUSES = new Set(["pending", "investigating"]);
+
+const FLAG_STATUSES = new Set([
+  "false_report",
+  "misleading_information",
+  "malicious_report",
+]);
+
+const ACCOUNT_ACTION_OPTIONS = [
+  { value: "", label: "Use policy suggestion" },
+  { value: "warning", label: "Warning (1 flag)" },
+  { value: "under_review", label: "Under review (2 flags)" },
+  { value: "suspended", label: "Temporary suspension (3+ flags)" },
+  { value: "blocked", label: "Account blocked (5+ flags)" },
+  { value: "none", label: "Confirm flag only (no sanction)" },
+];
 
 const getSortedOfficers = (officers) =>
   [...officers].sort((a, b) =>
@@ -34,6 +52,9 @@ const statusStyles = {
   investigating: "bg-cyan-500/10 text-cyan-300 border-cyan-500/30",
   crime_case: "bg-red-500/10 text-red-300 border-red-500/30",
   not_crime: "bg-emerald-500/10 text-emerald-300 border-emerald-500/30",
+  false_report: "bg-orange-500/10 text-orange-300 border-orange-500/30",
+  misleading_information: "bg-yellow-500/10 text-yellow-300 border-yellow-500/30",
+  malicious_report: "bg-rose-500/10 text-rose-300 border-rose-500/30",
   resolved: "bg-emerald-500/10 text-emerald-300 border-emerald-500/30",
   archived: "bg-slate-500/10 text-slate-300 border-slate-500/30",
 };
@@ -49,10 +70,14 @@ export default function CaseManagement() {
   const [selectedCase, setSelectedCase] = useState(null);
   const [viewFilter, setViewFilter] = useState("active");
   const [noteText, setNoteText] = useState("");
+  const [investigationReports, setInvestigationReports] = useState([]);
   const [success, setSuccess] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const claimingRef = useRef(new Set());
+  const currentUserId = String(user?.id || user?._id || "");
+
+  const isReportsView = viewFilter === "my_reports" || viewFilter === "all_reports";
 
   const claimCaseIfNeeded = async (item) => {
     if (
@@ -111,15 +136,22 @@ export default function CaseManagement() {
       setError("");
 
       const requests = isAdmin
-        ? [API.get("/investigation/cases?status=all"), API.get("/investigation/officers")]
-        : [API.get("/investigation/cases?status=all")];
+        ? [
+            API.get("/investigation/cases?status=all"),
+            API.get("/investigation/officers"),
+            API.get("/investigation/reports"),
+          ]
+        : [
+            API.get("/investigation/cases?status=all"),
+            Promise.resolve({ data: [] }),
+            API.get("/investigation/reports"),
+          ];
 
-      const [casesRes, officersRes] = await Promise.all(
-        isAdmin ? requests : [requests[0], Promise.resolve({ data: [] })]
-      );
+      const [casesRes, officersRes, reportsRes] = await Promise.all(requests);
 
       setCases(Array.isArray(casesRes.data) ? casesRes.data : []);
       setOfficers(Array.isArray(officersRes.data) ? officersRes.data : []);
+      setInvestigationReports(Array.isArray(reportsRes.data) ? reportsRes.data : []);
     } catch (err) {
       setError(err.response?.data?.message || "Failed to load case management data");
     } finally {
@@ -169,6 +201,9 @@ export default function CaseManagement() {
   const isResolvedStatus = (status) =>
     status === "crime_case" ||
     status === "not_crime" ||
+    status === "false_report" ||
+    status === "misleading_information" ||
+    status === "malicious_report" ||
     status === "resolved";
 
   const visibleCases = useMemo(() => {
@@ -188,6 +223,11 @@ export default function CaseManagement() {
     return cases.filter((item) => item.status === viewFilter);
   }, [cases, viewFilter]);
 
+  const visibleReports = useMemo(() => {
+    // API already scopes investigators to own reports; admin sees all.
+    return investigationReports;
+  }, [investigationReports]);
+
   const totals = useMemo(
     () => ({
       // Currently assigned & still open (excludes resolved)
@@ -198,8 +238,12 @@ export default function CaseManagement() {
       active: cases.filter((item) => ACTIVE_STATUSES.has(item.status)).length,
       investigating: cases.filter((item) => item.status === "investigating").length,
       resolved: cases.filter((item) => isResolvedStatus(item.status)).length,
+      myReports: investigationReports.filter(
+        (r) => String(r.investigator?._id || r.investigator) === currentUserId
+      ).length,
+      allReports: investigationReports.length,
     }),
-    [cases]
+    [cases, investigationReports, currentUserId]
   );
 
   const updateCase = async (id, updates) => {
@@ -216,6 +260,8 @@ export default function CaseManagement() {
 
       if (updates.assignedOfficer) {
         setSuccess("Officer assigned. Investigators were notified.");
+      } else if (updates.findings !== undefined) {
+        setSuccess("Investigation findings saved.");
       } else if (updates.status || typeof updates.isCrime === "boolean") {
         setSuccess("Case status updated.");
       }
@@ -257,6 +303,58 @@ export default function CaseManagement() {
     const label = isCrime ? "Crime Case" : "Not Crime";
     if (!window.confirm(`Resolve this case as ${label}?`)) return;
     await updateCase(id, { isCrime });
+  };
+
+  const flagCase = async (id, { flagType, reason }) => {
+    try {
+      setError("");
+      setSuccess("");
+      const res = await API.post(`/investigation/cases/${id}/flag`, {
+        flagType,
+        reason,
+      });
+      const updated = res.data.case;
+      setCases((prev) => {
+        const withoutOld = prev.filter((item) => item._id !== id);
+        return [updated, ...withoutOld];
+      });
+      setSelectedCase((prev) => (prev?._id === id ? updated : prev));
+      setSuccess(
+        res.data.message ||
+          "Report flagged. Admin must confirm before any account sanction."
+      );
+      return true;
+    } catch (err) {
+      setError(
+        err.response?.data?.message ||
+          err.response?.data?.error ||
+          "Failed to flag report"
+      );
+      return false;
+    }
+  };
+
+  const reviewFlag = async (id, payload) => {
+    try {
+      setError("");
+      setSuccess("");
+      const res = await API.post(`/investigation/cases/${id}/flag/review`, payload);
+      const updated = res.data.case;
+      setCases((prev) => {
+        const withoutOld = prev.filter((item) => item._id !== id);
+        return [updated, ...withoutOld];
+      });
+      setSelectedCase((prev) => (prev?._id === id ? updated : prev));
+      setSuccess(res.data.message || "Flag review saved.");
+      return true;
+    } catch (err) {
+      setError(
+        err.response?.data?.message ||
+          err.response?.data?.error ||
+          "Failed to review flag"
+      );
+      return false;
+    }
   };
 
   const updateStatus = async (id, status) => {
@@ -306,8 +404,49 @@ export default function CaseManagement() {
       investigating: "Investigating Cases",
       crime_case: "Crime Cases",
       not_crime: "Not Crime Cases",
+      false_report: "Flagged — False Reports",
+      misleading_information: "Flagged — Misleading Information",
+      malicious_report: "Flagged — Malicious Reports",
       archived: "Archived Cases",
+      my_reports: "My Investigation Reports",
+      all_reports: "All Investigation Reports",
     }[viewFilter] || "Cases";
+
+  const emptyViewHint =
+    {
+      false_report:
+        "Weli ma jiraan cases False Report loo calaamadeeyay. Tag Active Cases → fur case → Status Updates & Resolution → Mark as False Report.",
+      misleading_information:
+        "Weli ma jiraan cases Misleading Information loo calaamadeeyay. Fur active case oo flag-garee qaybta Status Updates & Resolution.",
+      malicious_report:
+        "Weli ma jiraan cases Malicious Report loo calaamadeeyay. Fur active case oo flag-garee qaybta Status Updates & Resolution.",
+      assigned: isInvestigator
+        ? "No open assigned cases right now."
+        : "No open assigned cases in this view.",
+      active: isInvestigator
+        ? "No cases in this view. Available crime cases and your open assigned work appear here."
+        : "No cases found in this view.",
+    }[viewFilter] ||
+    (isInvestigator
+      ? "No cases in this view. Available crime cases and your open assigned work appear here."
+      : "No cases found in this view.");
+
+  const openReportCase = (report) => {
+    const caseItem = report.case;
+    if (!caseItem?._id) {
+      setError("Linked case is missing for this report.");
+      return;
+    }
+    // Prefer fresh case from cases list if available
+    const match = cases.find((c) => c._id === caseItem._id) || caseItem;
+    openCase(match);
+  };
+
+  const removeLocalReport = (reportId) => {
+    setInvestigationReports((prev) =>
+      prev.filter((r) => (r._id || r.id) !== reportId)
+    );
+  };
 
   return (
     <div
@@ -338,21 +477,77 @@ export default function CaseManagement() {
             <option value="all">All Cases</option>
             <option value="pending">Pending</option>
             <option value="investigating">Investigating</option>
-            <option value="crime_case">Crime Case</option>
+            <option value="crime_case">Crime Case / Verified</option>
             <option value="not_crime">Not Crime</option>
+            <option value="false_report">Flagged: False Report</option>
+            <option value="misleading_information">Flagged: Misleading</option>
+            <option value="malicious_report">Flagged: Malicious</option>
             <option value="archived">Archived</option>
+            <option value="my_reports">
+              {isInvestigator ? "My Reports" : "My Reports"}
+            </option>
+            {isAdmin && <option value="all_reports">All Reports</option>}
           </select>
         </div>
 
         <div className="mb-8 grid grid-cols-1 gap-4 md:grid-cols-4">
           <Metric title="Assigned (Open)" value={totals.assigned} icon={UserCheck} />
           <Metric title="Active Cases" value={totals.active} icon={Activity} />
-          <Metric title="Investigating" value={totals.investigating} icon={Eye} />
+          <Metric
+            title={isAdmin ? "All Reports" : "My Reports"}
+            value={isAdmin ? totals.allReports : totals.myReports}
+            icon={FileText}
+          />
           <Metric title="Resolved" value={totals.resolved} icon={ShieldCheck} />
         </div>
 
         {loading ? (
           <p className="text-slate-400">Loading case management...</p>
+        ) : isReportsView ? (
+          <section className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+            <h2 className="mb-4 flex items-center gap-2 text-lg font-bold">
+              <ClipboardList className="text-cyan-300" size={20} />
+              {sectionTitle}
+            </h2>
+            <p className="mb-4 text-sm text-slate-400">
+              {isAdmin && viewFilter === "all_reports"
+                ? "Admin view — all investigation reports across investigators."
+                : "You only see investigation reports you authored."}
+            </p>
+            {visibleReports.length === 0 ? (
+              <p className="text-sm text-slate-400">
+                No investigation reports yet. Open an assigned case and create a report.
+              </p>
+            ) : (
+              <div className="space-y-3">
+                {visibleReports.map((report) => (
+                  <InvestigationReportRow
+                    key={report._id || report.id}
+                    report={report}
+                    isAdmin={isAdmin}
+                    currentUserId={currentUserId}
+                    onOpen={() => openReportCase(report)}
+                    onExport={() => {
+                      const caseItem = report.case;
+                      if (!caseItem) return;
+                      exportInvestigationCasePDF(caseItem, report);
+                    }}
+                    onDelete={async () => {
+                      if (!isAdmin) return;
+                      if (!window.confirm("Delete this investigation report?")) return;
+                      try {
+                        await API.delete(`/investigation/reports/${report._id || report.id}`);
+                        removeLocalReport(report._id || report.id);
+                        setSuccess("Investigation report deleted.");
+                      } catch (err) {
+                        setError(err.response?.data?.message || "Failed to delete report");
+                      }
+                    }}
+                  />
+                ))}
+              </div>
+            )}
+          </section>
         ) : (
           <section className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
             <h2 className="mb-4 flex items-center gap-2 text-lg font-bold">
@@ -361,11 +556,18 @@ export default function CaseManagement() {
             </h2>
 
             {visibleCases.length === 0 ? (
-              <p className="text-sm text-slate-400">
-                {isInvestigator
-                  ? "No cases in this view. Available crime cases and your open assigned work appear here."
-                  : "No cases found in this view."}
-              </p>
+              <div className="space-y-3">
+                <p className="text-sm text-slate-400">{emptyViewHint}</p>
+                {FLAG_STATUSES.has(viewFilter) && (
+                  <button
+                    type="button"
+                    onClick={() => setViewFilter("active")}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-xs font-bold text-cyan-300 hover:bg-cyan-500/20"
+                  >
+                    Go to Active Cases
+                  </button>
+                )}
+              </div>
             ) : (
               <div className="space-y-4">
                 {visibleCases.map((item) => (
@@ -401,6 +603,8 @@ export default function CaseManagement() {
             }}
             onClassify={(isCrime) => classifyCase(selectedCase._id, isCrime)}
             onStatus={(status) => updateStatus(selectedCase._id, status)}
+            onFlag={(payload) => flagCase(selectedCase._id, payload)}
+            onReviewFlag={(payload) => reviewFlag(selectedCase._id, payload)}
             onAddNote={addNote}
           />
         )}
@@ -538,10 +742,10 @@ function CaseRow({
 }) {
   const history = item.history || {};
   const canWorkCase =
-    isInvestigator &&
-    item.assignedOfficer &&
+    (isAdmin || (isInvestigator && item.assignedOfficer)) &&
     item.status !== "crime_case" &&
     item.status !== "not_crime" &&
+    !FLAG_STATUSES.has(item.status) &&
     item.status !== "archived";
 
   return (
@@ -636,6 +840,8 @@ function CaseDetails({
   onSaveAssignment,
   onClassify,
   onStatus,
+  onFlag,
+  onReviewFlag,
   onAddNote,
 }) {
   const history = item.history || {};
@@ -643,21 +849,43 @@ function CaseDetails({
   const isCrime = history.isCrime;
   const savedOfficerId = item.assignedOfficer?._id || "";
   const [pendingOfficerId, setPendingOfficerId] = useState(savedOfficerId);
+  const [flagReason, setFlagReason] = useState("");
+  const [flagChecked, setFlagChecked] = useState(false);
+  const [flagSubmitting, setFlagSubmitting] = useState(false);
+  const [adminAction, setAdminAction] = useState("");
+  const [adminNotes, setAdminNotes] = useState("");
+  const [reviewSubmitting, setReviewSubmitting] = useState(false);
+
+  const isCaseResolved =
+    item.status === "crime_case" ||
+    item.status === "not_crime" ||
+    FLAG_STATUSES.has(item.status) ||
+    item.status === "resolved";
 
   const canWorkCase =
-    (isInvestigator || isAdmin) &&
-    item.assignedOfficer &&
-    item.status !== "crime_case" &&
-    item.status !== "not_crime" &&
-    item.status !== "archived";
+    !isCaseResolved &&
+    item.status !== "archived" &&
+    (isAdmin || (isInvestigator && Boolean(item.assignedOfficer)));
   const canAddNotes =
     isAdmin ||
     (isInvestigator &&
       item.assignedOfficer &&
       item.status !== "archived");
 
+  const reportingUser = history.user || item.reportFlag?.reportingUser || null;
+  const hasCitizenReporter =
+    reportingUser &&
+    (reportingUser.role === "user" || !reportingUser.role);
+  const canFlagReport =
+    canWorkCase && item.reportFlag?.reviewStatus !== "pending";
+  const pendingFlag = item.reportFlag?.reviewStatus === "pending";
+
   useEffect(() => {
     setPendingOfficerId(item.assignedOfficer?._id || "");
+    setFlagReason("");
+    setFlagChecked(false);
+    setAdminAction("");
+    setAdminNotes("");
   }, [item._id, item.assignedOfficer?._id]);
 
   const handleSave = async () => {
@@ -667,6 +895,54 @@ function CaseDetails({
     }
     if (Object.keys(updates).length > 0) {
       await onSaveAssignment(updates);
+    }
+  };
+
+  const handleFlagSubmit = async () => {
+    if (!flagChecked) {
+      window.alert("Please check the False Report box first.");
+      return;
+    }
+    if (!flagReason.trim() || flagReason.trim().length < 5) {
+      window.alert("Please enter a reason (at least 5 characters).");
+      return;
+    }
+    const userNote = hasCitizenReporter
+      ? "This will increase the reporter's flag count. You will NOT block the account — an admin must confirm any sanction."
+      : "No citizen account is linked (e.g. Facebook/website scan). The case will be marked, but no user flag count will change.";
+    if (
+      !window.confirm(`Mark this report as False Report?\n\n${userNote}`)
+    ) {
+      return;
+    }
+    setFlagSubmitting(true);
+    try {
+      await onFlag({ flagType: "false_report", reason: flagReason.trim() });
+    } finally {
+      setFlagSubmitting(false);
+    }
+  };
+
+  const handleReview = async (decision) => {
+    const label = decision === "confirm" ? "confirm" : "reject";
+    if (
+      !window.confirm(
+        decision === "confirm"
+          ? "Confirm this flag and apply the selected account action?"
+          : "Reject this flag and roll back the reporter's flag count?"
+      )
+    ) {
+      return;
+    }
+    setReviewSubmitting(true);
+    try {
+      await onReviewFlag({
+        decision: label,
+        adminAction: decision === "confirm" ? adminAction || undefined : "none",
+        adminNotes: adminNotes.trim(),
+      });
+    } finally {
+      setReviewSubmitting(false);
     }
   };
 
@@ -683,14 +959,29 @@ function CaseDetails({
         badgeColor: "bg-cyan-500 text-slate-950",
       },
       crime_case: {
-        label: "Confirmed Crime Case",
-        badge: "Crime",
+        label: "Verified — Crime Case",
+        badge: "Verified",
         badgeColor: "bg-red-500 text-white",
       },
       not_crime: {
         label: "Dismissed — Not Crime",
         badge: "Closed",
         badgeColor: "bg-slate-500 text-white",
+      },
+      false_report: {
+        label: "False Report",
+        badge: "False",
+        badgeColor: "bg-orange-500 text-slate-950",
+      },
+      misleading_information: {
+        label: "Misleading Information",
+        badge: "Misleading",
+        badgeColor: "bg-yellow-500 text-slate-950",
+      },
+      malicious_report: {
+        label: "Malicious Report",
+        badge: "Malicious",
+        badgeColor: "bg-rose-600 text-white",
       },
       resolved: {
         label: "Resolved",
@@ -713,6 +1004,14 @@ function CaseDetails({
         .slice(-3)
         .toUpperCase()}`
     : "N/A";
+
+  const sourceLabel = [
+    history.sourceType || history.type,
+    history.pageName,
+    history.authorName,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
@@ -819,6 +1118,17 @@ function CaseDetails({
                   {formatStatus(item.status)}
                 </span>
               </div>
+              {(item.investigationStartedAt || item.assignedAt) && (
+                <p className="mt-2 text-xs text-slate-500">
+                  Investigation started:{" "}
+                  {formatDate(item.investigationStartedAt || item.assignedAt)}
+                </p>
+              )}
+              {item.resolvedAt && (
+                <p className="mt-1 text-xs text-slate-500">
+                  Resolved: {formatDate(item.resolvedAt)}
+                </p>
+              )}
             </div>
 
             <div className="rounded-xl border border-slate-800 bg-[#111827] p-5">
@@ -853,6 +1163,21 @@ function CaseDetails({
                   {caseId}
                 </span>
               </div>
+              {sourceLabel && (
+                <p className="mt-2 break-all text-xs text-slate-500">
+                  Source: {sourceLabel}
+                </p>
+              )}
+              {history.url && (
+                <a
+                  href={history.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-1 block break-all text-xs font-semibold text-cyan-400 hover:underline"
+                >
+                  {history.url}
+                </a>
+              )}
             </div>
 
             {(isInvestigator || isAdmin) && (
@@ -864,50 +1189,180 @@ function CaseDetails({
                   Status Updates & Resolution
                 </p>
 
-                {item.status === "crime_case" || item.status === "not_crime" ? (
-                  <div className="flex items-center gap-2">
-                    {item.status === "crime_case" ? (
-                      <>
-                        <ShieldAlert size={18} className="shrink-0 text-red-400" />
-                        <span className="text-sm font-bold text-red-300">
-                          Crime — Confirmed
-                        </span>
-                      </>
-                    ) : (
-                      <>
-                        <ShieldCheck size={18} className="shrink-0 text-emerald-400" />
-                        <span className="text-sm font-bold text-emerald-300">
-                          Not Crime
-                        </span>
-                      </>
+                {isCaseResolved ? (
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2">
+                      {item.status === "crime_case" ? (
+                        <>
+                          <ShieldAlert size={18} className="shrink-0 text-red-400" />
+                          <span className="text-sm font-bold text-red-300">
+                            Verified — Crime Confirmed
+                          </span>
+                        </>
+                      ) : FLAG_STATUSES.has(item.status) ? (
+                        <>
+                          <Flag size={18} className="shrink-0 text-orange-400" />
+                          <span className="text-sm font-bold text-orange-300">
+                            {formatStatus(item.status)}
+                            {item.reportFlag?.reviewStatus === "pending"
+                              ? " — Pending admin review"
+                              : item.reportFlag?.reviewStatus === "confirmed"
+                              ? " — Confirmed"
+                              : item.reportFlag?.reviewStatus === "rejected"
+                              ? " — Rejected"
+                              : ""}
+                          </span>
+                        </>
+                      ) : (
+                        <>
+                          <ShieldCheck size={18} className="shrink-0 text-emerald-400" />
+                          <span className="text-sm font-bold text-emerald-300">
+                            Not Crime
+                          </span>
+                        </>
+                      )}
+                    </div>
+                    {item.reportFlag?.reason && (
+                      <p className="text-xs text-slate-400">
+                        <span className="font-semibold text-slate-300">Flag reason: </span>
+                        {item.reportFlag.reason}
+                      </p>
+                    )}
+                    {isAdmin && pendingFlag && (
+                      <div className="space-y-3 border-t border-slate-700/60 pt-3">
+                        <p className="text-xs font-semibold text-amber-300">
+                          Admin review required
+                        </p>
+                        <select
+                          value={adminAction}
+                          onChange={(e) => setAdminAction(e.target.value)}
+                          className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200"
+                        >
+                          {ACCOUNT_ACTION_OPTIONS.map((opt) => (
+                            <option key={opt.value || "suggest"} value={opt.value}>
+                              {opt.label}
+                            </option>
+                          ))}
+                        </select>
+                        <textarea
+                          value={adminNotes}
+                          onChange={(e) => setAdminNotes(e.target.value)}
+                          rows={2}
+                          placeholder="Admin notes (optional)"
+                          className="w-full resize-none rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200"
+                        />
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            icon={ShieldCheck}
+                            label={reviewSubmitting ? "Saving…" : "Confirm & Sanction"}
+                            onClick={() => handleReview("confirm")}
+                            safe
+                          />
+                          <Button
+                            icon={X}
+                            label="Reject Flag"
+                            onClick={() => handleReview("reject")}
+                          />
+                        </div>
+                      </div>
                     )}
                   </div>
                 ) : canWorkCase ? (
-                  <div className="flex flex-wrap gap-2">
-                    {item.status === "pending" && (
+                  <div className="space-y-4">
+                    <div className="flex flex-wrap gap-2">
+                      {item.status === "pending" && (
+                        <Button
+                          icon={Activity}
+                          label="Start Investigating"
+                          onClick={() => onStatus("investigating")}
+                        />
+                      )}
                       <Button
-                        icon={Activity}
-                        label="Start Investigating"
-                        onClick={() => onStatus("investigating")}
+                        icon={ShieldAlert}
+                        label="Resolve as Crime"
+                        onClick={() => onClassify(true)}
+                        danger
                       />
+                      <Button
+                        icon={ShieldCheck}
+                        label="Resolve as Not Crime"
+                        onClick={() => onClassify(false)}
+                        safe
+                      />
+                      <Button
+                        icon={Archive}
+                        label="Archive"
+                        onClick={() => onStatus("archived")}
+                      />
+                    </div>
+
+                    {canFlagReport && (
+                      <div className="space-y-3 rounded-lg border border-orange-500/30 bg-orange-500/5 p-3">
+                        <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-orange-400/90">
+                          <Flag size={12} />
+                          Mark as False Report
+                        </p>
+                        <p className="text-[11px] text-slate-400">
+                          Use this when the submission is a false report.
+                          {hasCitizenReporter
+                            ? " Flag count goes to the reporter; admin confirms sanctions."
+                            : " No linked citizen account — case will be marked only."}
+                        </p>
+
+                        {hasCitizenReporter && (
+                          <div className="rounded-lg border border-slate-700/60 bg-slate-900/50 px-3 py-2 text-xs text-slate-300">
+                            Reporter:{" "}
+                            <span className="font-semibold text-white">
+                              {reportingUser.name || "Unknown"}
+                            </span>
+                            {reportingUser.email ? ` · ${reportingUser.email}` : ""}
+                            {typeof reportingUser.false_report_count === "number" && (
+                              <span className="ml-2 text-orange-300">
+                                · Flags: {reportingUser.false_report_count}
+                              </span>
+                            )}
+                          </div>
+                        )}
+
+                        <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-orange-500/40 bg-slate-900/60 px-3 py-3">
+                          <input
+                            type="checkbox"
+                            checked={flagChecked}
+                            onChange={(e) => setFlagChecked(e.target.checked)}
+                            className="mt-0.5 h-4 w-4 shrink-0 accent-orange-500"
+                          />
+                          <span className="min-w-0">
+                            <span className="block text-sm font-bold text-orange-300">
+                              False Report
+                            </span>
+                            <span className="mt-0.5 block text-[11px] text-slate-400">
+                              Tick this box to mark the submission as a false report.
+                            </span>
+                          </span>
+                        </label>
+                        <div>
+                          <label className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-slate-500">
+                            Reason
+                          </label>
+                          <textarea
+                            value={flagReason}
+                            onChange={(e) => setFlagReason(e.target.value)}
+                            rows={3}
+                            disabled={!flagChecked}
+                            placeholder="Explain why this is a false report…"
+                            className="w-full resize-none rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200 outline-none focus:border-orange-500/50 disabled:cursor-not-allowed disabled:opacity-50"
+                          />
+                        </div>
+                        <Button
+                          icon={Flag}
+                          label={
+                            flagSubmitting ? "Flagging…" : "Mark as False Report"
+                          }
+                          onClick={handleFlagSubmit}
+                          danger
+                        />
+                      </div>
                     )}
-                    <Button
-                      icon={ShieldAlert}
-                      label="Resolve as Crime"
-                      onClick={() => onClassify(true)}
-                      danger
-                    />
-                    <Button
-                      icon={ShieldCheck}
-                      label="Resolve as Not Crime"
-                      onClick={() => onClassify(false)}
-                      safe
-                    />
-                    <Button
-                      icon={Archive}
-                      label="Archive"
-                      onClick={() => onStatus("archived")}
-                    />
                   </div>
                 ) : (
                   <p className="text-sm text-slate-400">
@@ -929,7 +1384,7 @@ function CaseDetails({
               <textarea
                 readOnly
                 value={history.content || "No content available."}
-                className="h-56 w-full resize-none rounded-xl border border-slate-700/60 bg-[#0d1117] p-4 font-mono text-sm leading-relaxed text-slate-300 outline-none"
+                className="h-40 w-full resize-none rounded-xl border border-slate-700/60 bg-[#0d1117] p-4 font-mono text-sm leading-relaxed text-slate-300 outline-none"
               />
             </div>
 
@@ -985,6 +1440,69 @@ function CaseDetails({
   );
 }
 
+function InvestigationReportRow({
+  report,
+  isAdmin,
+  currentUserId,
+  onOpen,
+  onExport,
+  onDelete,
+}) {
+  const caseItem = report.case || {};
+  const ownerId = String(report.investigator?._id || report.investigator || "");
+  const isOwn = ownerId === String(currentUserId);
+  const caseLabel = caseItem._id
+    ? `${caseItem._id.toString().slice(-6).toUpperCase()}`
+    : "—";
+
+  return (
+    <div className="flex flex-col gap-3 rounded-xl border border-slate-800 bg-slate-950/50 p-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="min-w-0">
+        <p className="truncate text-sm font-bold text-white">{report.title}</p>
+        <p className="mt-1 text-xs text-slate-400">
+          Case #{caseLabel}
+          {" · "}
+          {report.investigator?.name || "Investigator"}
+          {" · "}
+          <span className="uppercase">{report.status}</span>
+          {" · "}
+          Updated {formatDate(report.updatedAt)}
+        </p>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={onOpen}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-xs font-bold text-cyan-300 hover:bg-cyan-500/20"
+        >
+          <Eye size={14} />
+          Open case
+        </button>
+        {(isAdmin || isOwn) && (
+          <button
+            type="button"
+            onClick={onExport}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-xs font-bold text-slate-200 hover:bg-slate-700"
+          >
+            <Download size={14} />
+            PDF
+          </button>
+        )}
+        {isAdmin && (
+          <button
+            type="button"
+            onClick={onDelete}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-bold text-red-300 hover:bg-red-500/20"
+          >
+            <Trash2 size={14} />
+            Delete
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function Button({ icon: Icon, label, onClick, danger = false, safe = false }) {
   return (
     <button
@@ -1014,8 +1532,11 @@ function formatStatus(status = "") {
     {
       pending: "Pending",
       investigating: "Investigating",
-      crime_case: "Crime Case",
+      crime_case: "Verified (Crime Case)",
       not_crime: "Not Crime",
+      false_report: "False Report",
+      misleading_information: "Misleading Information",
+      malicious_report: "Malicious Report",
       resolved: "Resolved",
       archived: "Archived",
     }[status] || status

@@ -18,6 +18,20 @@ const protect = async (req, res, next) => {
 
     if (!req.user) return res.status(401).json({ message: "User not found" });
 
+    const accountStatus = req.user.account_status || "active";
+    if (
+      req.user.role === "user" &&
+      (accountStatus === "blocked" || accountStatus === "suspended")
+    ) {
+      return res.status(403).json({
+        message:
+          accountStatus === "blocked"
+            ? "Your account has been blocked due to repeated false or malicious reports."
+            : "Your account is temporarily suspended pending review.",
+        account_status: accountStatus,
+      });
+    }
+
     next();
   } catch (error) {
     res.status(401).json({ message: "Token failed" });

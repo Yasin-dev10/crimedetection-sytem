@@ -24,6 +24,7 @@ import WebsitePages from "./page/WebsitePages";
 import VerifyEmailPage from "./page/VerifyEmailPage";
 import ChangePasswordPage from "./page/ChangePasswordPage";
 import Reports from "./page/Reports";
+import AuditLogs from "./page/AuditLogs";
 
 const homeByRole = {
   admin: "/dashboard",
@@ -331,6 +332,16 @@ export default function App() {
           element={
             <Protected roles={["admin", "investigator"]}>
               <Reports />
+            </Protected>
+          }
+        />
+
+        {/* Audit Logs */}
+        <Route
+          path="/audit-logs"
+          element={
+            <Protected roles={["admin", "investigator"]}>
+              <AuditLogs />
             </Protected>
           }
         />

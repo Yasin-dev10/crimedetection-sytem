@@ -239,6 +239,7 @@ const acceptCaseByInvestigator = async ({ caseId, investigator }) => {
         assignedOfficer: investigator._id,
         status: "investigating",
         assignedAt: new Date(),
+        investigationStartedAt: new Date(),
       },
     },
     { new: true }

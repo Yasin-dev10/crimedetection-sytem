@@ -180,17 +180,86 @@ const login = async (req, res) => {
       return res.status(400).json({ message: "Email and password are required" });
     }
 
-    const user = await User.findOne({ email: email.trim().toLowerCase() });
-    if (!user) return res.status(401).json({ message: "Invalid email or password" });
+    const normalizedEmail = email.trim().toLowerCase();
+    const user = await User.findOne({ email: normalizedEmail });
+
+    const recordFailedLogin = async (reason, actor = null) => {
+      await logActivity({
+        req,
+        user: actor,
+        action: "login_failed",
+        status: "failed",
+        userName: actor?.name || normalizedEmail,
+        role: actor?.role || null,
+        details: { email: normalizedEmail, reason },
+      });
+
+      try {
+        const ActivityLog = require("../model/ActivityLog");
+        const windowStart = new Date(Date.now() - 15 * 60 * 1000);
+        const failCount = await ActivityLog.countDocuments({
+          action: "login_failed",
+          createdAt: { $gte: windowStart },
+          $or: [
+            { "details.email": normalizedEmail },
+            ...(actor?._id ? [{ user: actor._id }] : []),
+          ],
+        });
+        if (failCount >= 3) {
+          await logActivity({
+            req,
+            user: actor,
+            action: "multiple_failed_logins",
+            status: "failed",
+            userName: actor?.name || normalizedEmail,
+            role: actor?.role || null,
+            details: {
+              email: normalizedEmail,
+              attemptCount: failCount,
+              windowMinutes: 15,
+            },
+          });
+        }
+      } catch (countError) {
+        console.error("Failed login count error:", countError.message);
+      }
+    };
+
+    if (!user) {
+      await recordFailedLogin("unknown_email");
+      return res.status(401).json({ message: "Invalid email or password" });
+    }
 
     if (!user.password || typeof user.password !== "string") {
+      await recordFailedLogin("password_not_configured", user);
       return res.status(401).json({
         message: "Account password is not configured. Please reset or recreate this user.",
       });
     }
 
     const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) return res.status(401).json({ message: "Invalid email or password" });
+    if (!isMatch) {
+      await recordFailedLogin("invalid_password", user);
+      return res.status(401).json({ message: "Invalid email or password" });
+    }
+
+    const accountStatus = user.account_status || "active";
+    if (accountStatus === "blocked") {
+      await recordFailedLogin("account_blocked", user);
+      return res.status(403).json({
+        message:
+          "Your account has been blocked due to repeated false or malicious reports. Contact an administrator.",
+        account_status: "blocked",
+      });
+    }
+    if (accountStatus === "suspended") {
+      await recordFailedLogin("account_suspended", user);
+      return res.status(403).json({
+        message:
+          "Your account is temporarily suspended pending review of false report flags. Contact an administrator.",
+        account_status: "suspended",
+      });
+    }
 
     if (!user.emailVerified && user.emailVerificationOTP) {
       return res.status(403).json({
@@ -253,6 +322,16 @@ const verifyLoginOTP = async (req, res) => {
     });
 
     if (!user) {
+      await logActivity({
+        req,
+        action: "login_failed",
+        status: "failed",
+        userName: email.trim().toLowerCase(),
+        details: {
+          email: email.trim().toLowerCase(),
+          reason: "invalid_or_expired_otp",
+        },
+      });
       return res.status(400).json({ message: "Invalid or expired verification code" });
     }
 
@@ -410,6 +489,19 @@ const changePassword = async (req, res) => {
     user.isPasswordChangeRequired = false;
     user.passwordChangedAt = new Date();
     await user.save();
+
+    await logActivity({
+      req,
+      user,
+      action: "password_reset",
+      resourceType: "User",
+      resourceId: user._id,
+      details: {
+        targetName: user.name,
+        targetEmail: user.email,
+        method: "change_password",
+      },
+    });
 
     res.json({
       message: "Password changed successfully",

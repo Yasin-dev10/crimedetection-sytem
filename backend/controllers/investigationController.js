@@ -11,18 +11,39 @@ const {
   clearCaseAvailableQueue,
   acceptCaseByInvestigator,
 } = require("../services/crimeDetectionService");
+const { syncAutoInvestigationReport } = require("../utils/autoInvestigationReport");
+const {
+  FLAG_STATUSES,
+  ACCOUNT_STATUSES,
+  suggestAccountStatus,
+  FLAG_TYPE_LABELS,
+} = require("../utils/reportFlagPolicy");
 
 const populateCase = (query) =>
   query
     .populate({
       path: "history",
-      populate: {
-        path: "blacklistMatches.item",
-        options: { strictPopulate: false },
-      },
+      populate: [
+        {
+          path: "blacklistMatches.item",
+          options: { strictPopulate: false },
+        },
+        {
+          path: "user",
+          select:
+            "name email role false_report_count is_flagged flag_reason flagged_at account_status",
+        },
+      ],
     })
     .populate("assignedOfficer", "name email role badgeNumber station phone phoneVerified emailAlerts pushNotifications specializations")
-    .populate("notes.officer", "name email role");
+    .populate("resolvedBy", "name email role badgeNumber")
+    .populate("notes.officer", "name email role")
+    .populate("reportFlag.flaggedBy", "name email role")
+    .populate("reportFlag.reviewedBy", "name email role")
+    .populate(
+      "reportFlag.reportingUser",
+      "name email role false_report_count is_flagged account_status"
+    );
 
 const normalizeAlertText = (text = "") =>
   String(text)
@@ -76,8 +97,16 @@ const normalizeCategory = (category) =>
   CASE_CATEGORIES.includes(category) ? category : "general";
 
 // Statuses that count as a resolved/closed decision on a case
-const RESOLVED_STATUSES = ["crime_case", "not_crime", "resolved"];
+const RESOLVED_STATUSES = [
+  "crime_case",
+  "not_crime",
+  "false_report",
+  "misleading_information",
+  "malicious_report",
+  "resolved",
+];
 const isResolvedStatus = (status) => RESOLVED_STATUSES.includes(status);
+const isFlagStatus = (status) => FLAG_STATUSES.includes(status);
 
 const inferCaseCategory = (history = {}) => {
   const text = [
@@ -274,7 +303,11 @@ const createCaseFromAlert = async (req, res) => {
           action: "case_assigned",
           resourceType: "InvestigationCase",
           resourceId: existingCase._id,
-          details: { assignedOfficer: newOfficerId },
+          details: {
+            caseNumber: String(existingCase._id).slice(-6).toUpperCase(),
+            assignedOfficer: newOfficerId,
+            officerName: populatedExisting.assignedOfficer?.name || null,
+          },
         });
       }
 
@@ -284,7 +317,11 @@ const createCaseFromAlert = async (req, res) => {
           action: "case_resolved",
           resourceType: "InvestigationCase",
           resourceId: existingCase._id,
-          details: { from: previousStatus, to: existingCase.status },
+          details: {
+            caseNumber: String(existingCase._id).slice(-6).toUpperCase(),
+            from: previousStatus,
+            to: existingCase.status,
+          },
         });
       }
 
@@ -374,6 +411,7 @@ const createCaseFromAlert = async (req, res) => {
       resourceType: "InvestigationCase",
       resourceId: investigationCase._id,
       details: {
+        caseNumber: String(investigationCase._id).slice(-6).toUpperCase(),
         category: normalizedCategory,
         status: investigationCase.status,
         assignedOfficer: assignedOfficerId || null,
@@ -386,7 +424,11 @@ const createCaseFromAlert = async (req, res) => {
         action: "case_assigned",
         resourceType: "InvestigationCase",
         resourceId: investigationCase._id,
-        details: { assignedOfficer: assignedOfficerId },
+        details: {
+          caseNumber: String(investigationCase._id).slice(-6).toUpperCase(),
+          assignedOfficer: assignedOfficerId,
+          officerName: populated.assignedOfficer?.name || null,
+        },
       });
     }
 
@@ -500,7 +542,7 @@ const acceptCase = async (req, res) => {
 
 const updateCase = async (req, res) => {
   try {
-    const { status, assignedOfficer, isCrime, category } = req.body;
+    const { status, assignedOfficer, isCrime, category, findings } = req.body;
     const updates = {};
 
     const existingCase = await InvestigationCase.findById(req.params.id).populate(
@@ -537,6 +579,10 @@ const updateCase = async (req, res) => {
       }
 
       updates.category = normalizeCategory(category);
+    }
+
+    if (findings !== undefined) {
+      updates.findings = String(findings || "").trim();
     }
 
     if (assignedOfficer !== undefined) {
@@ -637,6 +683,16 @@ const updateCase = async (req, res) => {
       }
     }
 
+    // Record when investigation work formally began
+    const nextStatus = updates.status || existingCase.status;
+    if (
+      nextStatus === "investigating" &&
+      !existingCase.investigationStartedAt &&
+      !updates.investigationStartedAt
+    ) {
+      updates.investigationStartedAt = new Date();
+    }
+
     const investigationCase = await populateCase(
       InvestigationCase.findByIdAndUpdate(req.params.id, updates, {
         new: true,
@@ -673,6 +729,24 @@ const updateCase = async (req, res) => {
           changed: Object.keys(updates),
         },
       });
+    }
+
+    // Auto-generate / refresh the investigator's formal report (no manual form)
+    const reportOwnerId =
+      investigationCase.assignedOfficer?._id ||
+      investigationCase.assignedOfficer ||
+      (willBeResolved ? req.user._id : null);
+
+    if (reportOwnerId) {
+      try {
+        await syncAutoInvestigationReport({
+          investigationCase,
+          investigatorId: reportOwnerId,
+          finalize: isResolvedStatus(investigationCase.status),
+        });
+      } catch (syncError) {
+        console.error("Auto investigation report sync failed:", syncError.message);
+      }
     }
 
     res.json({
@@ -732,6 +806,21 @@ const addCaseNote = async (req, res) => {
       InvestigationCase.findById(investigationCase._id)
     );
 
+    // Keep auto draft report in sync with notes
+    const reportOwnerId =
+      populated.assignedOfficer?._id || populated.assignedOfficer || req.user._id;
+    if (reportOwnerId) {
+      try {
+        await syncAutoInvestigationReport({
+          investigationCase: populated,
+          investigatorId: reportOwnerId,
+          finalize: isResolvedStatus(populated.status),
+        });
+      } catch (syncError) {
+        console.error("Auto investigation report sync failed:", syncError.message);
+      }
+    }
+
     res.json({
       message: "Note added successfully",
       case: populated,
@@ -761,6 +850,350 @@ const deleteCase = async (req, res) => {
   }
 };
 
+/**
+ * Investigator marks a case as False Report / Misleading / Malicious.
+ * Increments the reporting user's flag count but does NOT sanction the account.
+ */
+const flagCase = async (req, res) => {
+  try {
+    const { flagType, reason } = req.body;
+    const normalizedType = String(flagType || "")
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, "_");
+
+    if (!FLAG_STATUSES.includes(normalizedType)) {
+      return res.status(400).json({
+        message:
+          "flagType must be false_report, misleading_information, or malicious_report",
+      });
+    }
+
+    const reasonText = String(reason || "").trim();
+    if (reasonText.length < 5) {
+      return res.status(400).json({
+        message: "A reason of at least 5 characters is required",
+      });
+    }
+
+    const existingCase = await InvestigationCase.findById(req.params.id).populate(
+      "history"
+    );
+
+    if (!existingCase) {
+      return res.status(404).json({ message: "Case not found" });
+    }
+
+    if (req.user.role === "investigator") {
+      if (!existingCase.assignedOfficer) {
+        return res.status(403).json({
+          message:
+            "This case is not assigned yet. Wait for an admin to assign an investigator.",
+        });
+      }
+      if (existingCase.assignedOfficer.toString() !== req.user._id.toString()) {
+        return res.status(403).json({ message: "This case is not assigned to you" });
+      }
+    }
+
+    if (existingCase.reportFlag?.reviewStatus === "pending") {
+      return res.status(400).json({
+        message: "This case already has a flag pending admin review",
+      });
+    }
+
+    if (
+      existingCase.reportFlag?.reviewStatus === "confirmed" &&
+      isFlagStatus(existingCase.status)
+    ) {
+      return res.status(400).json({
+        message: "This case was already flagged and confirmed by an admin",
+      });
+    }
+
+    const historyDoc = existingCase.history;
+    const reportingUserId =
+      historyDoc?.user?._id || historyDoc?.user || null;
+
+    let reportingUser = null;
+    if (reportingUserId) {
+      reportingUser = await User.findById(reportingUserId);
+      if (!reportingUser) {
+        return res.status(404).json({ message: "Reporting user not found" });
+      }
+
+      if (["admin", "investigator"].includes(reportingUser.role)) {
+        return res.status(400).json({
+          message: "Staff accounts cannot be flagged for false reports",
+        });
+      }
+
+      const alreadyCounted =
+        existingCase.reportFlag?.reviewStatus === "confirmed" ||
+        (existingCase.reportFlag?.reviewStatus === "pending" &&
+          existingCase.reportFlag?.reportingUser?.toString() ===
+            reportingUserId.toString());
+
+      if (!alreadyCounted) {
+        reportingUser.false_report_count =
+          (reportingUser.false_report_count || 0) + 1;
+      }
+
+      reportingUser.is_flagged = true;
+      reportingUser.flag_reason = reasonText;
+      reportingUser.flagged_by = req.user._id;
+      reportingUser.flagged_at = new Date();
+      // Investigators never change account_status — admin confirms later
+      await reportingUser.save();
+    }
+
+    const wasResolved = isResolvedStatus(existingCase.status);
+
+    existingCase.status = normalizedType;
+    existingCase.reportFlag = {
+      type: normalizedType,
+      reason: reasonText,
+      flaggedBy: req.user._id,
+      flaggedAt: new Date(),
+      reviewStatus: "pending",
+      reviewedBy: null,
+      reviewedAt: null,
+      adminAction: null,
+      adminNotes: "",
+      reportingUser: reportingUser?._id || null,
+    };
+
+    if (!wasResolved) {
+      existingCase.resolvedAt = new Date();
+      existingCase.resolvedBy = req.user._id;
+    }
+
+    await existingCase.save();
+
+    await History.findByIdAndUpdate(historyDoc._id || historyDoc, {
+      isCrime: false,
+      prediction: "not crime-related",
+      investigationStatus: normalizedType,
+    });
+
+    const populated = await populateCase(
+      InvestigationCase.findById(existingCase._id)
+    );
+
+    await logActivity({
+      req,
+      action: "report_flagged",
+      resourceType: "InvestigationCase",
+      resourceId: existingCase._id,
+      details: {
+        flagType: normalizedType,
+        flagLabel: FLAG_TYPE_LABELS[normalizedType],
+        reason: reasonText,
+        reportingUserId: reportingUser?._id || null,
+        reportingUserEmail: reportingUser?.email || null,
+        false_report_count: reportingUser?.false_report_count ?? null,
+        caseOnly: !reportingUser,
+      },
+    });
+
+    return res.json({
+      message: reportingUser
+        ? `${FLAG_TYPE_LABELS[normalizedType]} recorded. Pending admin review — no account sanction applied yet.`
+        : `${FLAG_TYPE_LABELS[normalizedType]} recorded on this case. No linked citizen account to flag.`,
+      case: populated,
+      reportingUser: reportingUser
+        ? {
+            _id: reportingUser._id,
+            name: reportingUser.name,
+            email: reportingUser.email,
+            false_report_count: reportingUser.false_report_count,
+            is_flagged: reportingUser.is_flagged,
+            account_status: reportingUser.account_status,
+          }
+        : null,
+      suggestedAction: reportingUser
+        ? suggestAccountStatus(reportingUser.false_report_count)
+        : null,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      message: "Failed to flag report",
+      error: error.message,
+    });
+  }
+};
+
+/**
+ * Admin confirms or rejects an investigator flag, then may apply sanctions.
+ */
+const reviewCaseFlag = async (req, res) => {
+  try {
+    const { decision, adminAction, adminNotes } = req.body;
+    const normalizedDecision = String(decision || "")
+      .trim()
+      .toLowerCase();
+
+    if (!["confirm", "reject"].includes(normalizedDecision)) {
+      return res.status(400).json({
+        message: 'decision must be "confirm" or "reject"',
+      });
+    }
+
+    const existingCase = await InvestigationCase.findById(req.params.id).populate(
+      "history"
+    );
+
+    if (!existingCase) {
+      return res.status(404).json({ message: "Case not found" });
+    }
+
+    if (!existingCase.reportFlag?.reviewStatus) {
+      return res.status(400).json({
+        message: "This case has no report flag to review",
+      });
+    }
+
+    if (existingCase.reportFlag.reviewStatus !== "pending") {
+      return res.status(400).json({
+        message: `Flag was already ${existingCase.reportFlag.reviewStatus}`,
+      });
+    }
+
+    const reportingUserId =
+      existingCase.reportFlag.reportingUser ||
+      existingCase.history?.user?._id ||
+      existingCase.history?.user;
+
+    const reportingUser = reportingUserId
+      ? await User.findById(reportingUserId)
+      : null;
+
+    if (normalizedDecision === "reject") {
+      existingCase.reportFlag.reviewStatus = "rejected";
+      existingCase.reportFlag.reviewedBy = req.user._id;
+      existingCase.reportFlag.reviewedAt = new Date();
+      existingCase.reportFlag.adminAction = "none";
+      existingCase.reportFlag.adminNotes = String(adminNotes || "").trim();
+
+      if (reportingUser) {
+        reportingUser.false_report_count = Math.max(
+          0,
+          (reportingUser.false_report_count || 0) - 1
+        );
+        if (reportingUser.false_report_count === 0) {
+          reportingUser.is_flagged = false;
+          reportingUser.flag_reason = null;
+          reportingUser.flagged_by = null;
+          reportingUser.flagged_at = null;
+        }
+        await reportingUser.save();
+      }
+
+      await existingCase.save();
+
+      const populated = await populateCase(
+        InvestigationCase.findById(existingCase._id)
+      );
+
+      await logActivity({
+        req,
+        action: "report_flag_rejected",
+        resourceType: "InvestigationCase",
+        resourceId: existingCase._id,
+        details: {
+          reportingUserId: reportingUser?._id,
+          false_report_count: reportingUser?.false_report_count,
+        },
+      });
+
+      return res.json({
+        message: "Flag rejected. Reporting user flag count was rolled back.",
+        case: populated,
+        reportingUser,
+      });
+    }
+
+    // Confirm
+    let appliedStatus = null;
+    const suggested = reportingUser
+      ? suggestAccountStatus(reportingUser.false_report_count)
+      : "active";
+
+    if (adminAction !== undefined && adminAction !== null && adminAction !== "") {
+      const normalizedAction = String(adminAction).trim().toLowerCase();
+      if (!ACCOUNT_STATUSES.includes(normalizedAction) && normalizedAction !== "none") {
+        return res.status(400).json({
+          message: `adminAction must be one of: none, ${ACCOUNT_STATUSES.join(", ")}`,
+        });
+      }
+      appliedStatus = normalizedAction === "none" ? null : normalizedAction;
+    } else {
+      appliedStatus = suggested;
+    }
+
+    existingCase.reportFlag.reviewStatus = "confirmed";
+    existingCase.reportFlag.reviewedBy = req.user._id;
+    existingCase.reportFlag.reviewedAt = new Date();
+    existingCase.reportFlag.adminAction = appliedStatus || "none";
+    existingCase.reportFlag.adminNotes = String(adminNotes || "").trim();
+    await existingCase.save();
+
+    if (reportingUser && appliedStatus) {
+      reportingUser.account_status = appliedStatus;
+      reportingUser.is_flagged = true;
+      if (appliedStatus === "blocked" || appliedStatus === "suspended") {
+        reportingUser.status = "inactive";
+      }
+      await reportingUser.save();
+
+      await logActivity({
+        req,
+        action: "account_sanctioned",
+        resourceType: "User",
+        resourceId: reportingUser._id,
+        details: {
+          account_status: appliedStatus,
+          false_report_count: reportingUser.false_report_count,
+          caseId: existingCase._id,
+          flagType: existingCase.reportFlag.type,
+        },
+      });
+    }
+
+    const populated = await populateCase(
+      InvestigationCase.findById(existingCase._id)
+    );
+
+    await logActivity({
+      req,
+      action: "report_flag_confirmed",
+      resourceType: "InvestigationCase",
+      resourceId: existingCase._id,
+      details: {
+        reportingUserId: reportingUser?._id,
+        account_status: appliedStatus,
+        false_report_count: reportingUser?.false_report_count,
+        flagType: existingCase.reportFlag.type,
+      },
+    });
+
+    return res.json({
+      message: appliedStatus
+        ? `Flag confirmed. Account status set to ${appliedStatus}.`
+        : "Flag confirmed. No account status change applied.",
+      case: populated,
+      reportingUser,
+      suggestedAction: suggested,
+      appliedAction: appliedStatus,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      message: "Failed to review report flag",
+      error: error.message,
+    });
+  }
+};
+
 const getInvestigators = async (req, res) => {
   try {
     const officers = await User.find({ role: "investigator" })
@@ -785,4 +1218,6 @@ module.exports = {
   deleteCase,
   getInvestigators,
   acceptCase,
+  flagCase,
+  reviewCaseFlag,
 };

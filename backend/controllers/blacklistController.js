@@ -26,6 +26,7 @@ const {
   parseFakeCrimeThreshold,
   buildFakeCrimeSubjects,
 } = require("../services/fakeCrimeReportService");
+const { logActivity } = require("../utils/activityLogger");
 
 const normalizeBlacklistValue = (value = "") =>
   String(value).trim().replace(/\/+$/, "").toLowerCase();
@@ -230,6 +231,18 @@ const createBlacklistItem = async (req, res) => {
       createdBy: req.user?._id,
     });
 
+    await logActivity({
+      req,
+      action: "blacklist_entry_added",
+      resourceType: "BlacklistItem",
+      resourceId: item._id,
+      details: {
+        name: item.name,
+        type: item.type,
+        value: item.value,
+      },
+    });
+
     res.status(201).json({
       message: "Blacklist item created",
       item,
@@ -302,6 +315,18 @@ const updateBlacklistItem = async (req, res) => {
       });
     }
 
+    await logActivity({
+      req,
+      action: "blacklist_entry_updated",
+      resourceType: "BlacklistItem",
+      resourceId: item._id,
+      details: {
+        name: item.name,
+        type: item.type,
+        value: item.value,
+      },
+    });
+
     res.json({
       message: "Blacklist item updated",
       item,
@@ -323,6 +348,18 @@ const deleteBlacklistItem = async (req, res) => {
         message: "Blacklist item not found",
       });
     }
+
+    await logActivity({
+      req,
+      action: "blacklist_entry_removed",
+      resourceType: "BlacklistItem",
+      resourceId: item._id,
+      details: {
+        name: item.name,
+        type: item.type,
+        value: item.value,
+      },
+    });
 
     res.json({
       message: "Blacklist item deleted",
@@ -709,6 +746,90 @@ const getFakeCrimeSubjects = async (req, res) => {
   }
 };
 
+/**
+ * Investigator false / misleading / malicious report flags for blacklist UI.
+ */
+const getReportFlags = async (req, res) => {
+  try {
+    const reviewStatus = String(req.query.reviewStatus || "all")
+      .trim()
+      .toLowerCase();
+    const flagType = String(req.query.flagType || "all")
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, "_");
+
+    const filter = {
+      "reportFlag.type": {
+        $in: [
+          "false_report",
+          "misleading_information",
+          "malicious_report",
+        ],
+      },
+    };
+
+    if (["pending", "confirmed", "rejected"].includes(reviewStatus)) {
+      filter["reportFlag.reviewStatus"] = reviewStatus;
+    }
+
+    if (
+      ["false_report", "misleading_information", "malicious_report"].includes(
+        flagType
+      )
+    ) {
+      filter["reportFlag.type"] = flagType;
+    }
+
+    const cases = await InvestigationCase.find(filter)
+      .sort({ "reportFlag.flaggedAt": -1, updatedAt: -1 })
+      .populate({
+        path: "history",
+        select:
+          "content sourceType type url pageName authorName user prediction confidence investigationStatus createdAt",
+        populate: {
+          path: "user",
+          select:
+            "name email role false_report_count is_flagged flag_reason account_status",
+        },
+      })
+      .populate("reportFlag.flaggedBy", "name email role")
+      .populate("reportFlag.reviewedBy", "name email role")
+      .populate(
+        "reportFlag.reportingUser",
+        "name email role false_report_count is_flagged account_status"
+      )
+      .populate("assignedOfficer", "name email role")
+      .lean();
+
+    const summary = {
+      total: cases.length,
+      pending: cases.filter((c) => c.reportFlag?.reviewStatus === "pending")
+        .length,
+      confirmed: cases.filter((c) => c.reportFlag?.reviewStatus === "confirmed")
+        .length,
+      rejected: cases.filter((c) => c.reportFlag?.reviewStatus === "rejected")
+        .length,
+      false_report: cases.filter((c) => c.reportFlag?.type === "false_report")
+        .length,
+      misleading_information: cases.filter(
+        (c) => c.reportFlag?.type === "misleading_information"
+      ).length,
+      malicious_report: cases.filter(
+        (c) => c.reportFlag?.type === "malicious_report"
+      ).length,
+    };
+
+    res.json({ summary, flags: cases });
+  } catch (error) {
+    console.error("REPORT FLAGS ERROR:", error);
+    res.status(500).json({
+      message: "Failed to fetch report flags",
+      error: error.message,
+    });
+  }
+};
+
 const getBlacklistStats = async (req, res) => {
   try {
     // Get all blacklist items
@@ -819,5 +940,6 @@ module.exports = {
   scanSingleWebsiteBlacklist,
   getWebsitePages,
   getFakeCrimeSubjects,
+  getReportFlags,
   getBlacklistStats,
 };

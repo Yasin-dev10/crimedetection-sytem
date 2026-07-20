@@ -9,10 +9,15 @@ const {
 const {
   sendOTPWithPasswordEmail,
 } = require("../services/emailService");
+const { logActivity } = require("../utils/activityLogger");
 
 const getUsers = async (req, res) => {
   try {
-    const users = await User.find().select("-password").sort({ createdAt: -1 }).lean();
+    const users = await User.find()
+      .select("-password")
+      .populate("flagged_by", "name email role")
+      .sort({ createdAt: -1 })
+      .lean();
     const normalizedUsers = users.map((user) => ({
       ...user,
       id: user._id?.toString(),
@@ -207,6 +212,18 @@ const createInvestigator = async (req, res) => {
       });
     }
 
+    await logActivity({
+      req,
+      action: "user_created",
+      resourceType: "User",
+      resourceId: investigator._id,
+      details: {
+        targetName: investigator.name,
+        targetEmail: investigator.email,
+        targetRole: investigator.role,
+      },
+    });
+
     const response = {
       message: "Investigator created successfully. Verification code and password have been sent to their email.",
       emailSent: true,
@@ -272,13 +289,39 @@ const updateUser = async (req, res) => {
       user.profileImage = `/uploads/investigator/${req.file.filename}`;
     }
 
-    if (password && password.trim()) {
+    const passwordReset = Boolean(password && password.trim());
+    if (passwordReset) {
       user.password = await bcrypt.hash(password, 10);
       user.isPasswordChangeRequired = true;
       user.passwordChangedAt = null;
     }
 
     await user.save();
+
+    await logActivity({
+      req,
+      action: "user_updated",
+      resourceType: "User",
+      resourceId: user._id,
+      details: {
+        targetName: user.name,
+        targetEmail: user.email,
+        targetRole: user.role,
+      },
+    });
+
+    if (passwordReset) {
+      await logActivity({
+        req,
+        action: "password_reset",
+        resourceType: "User",
+        resourceId: user._id,
+        details: {
+          targetName: user.name,
+          targetEmail: user.email,
+        },
+      });
+    }
 
     res.json({
       message: "User updated successfully",
@@ -311,6 +354,19 @@ const deleteUser = async (req, res) => {
     if (!deletedUser) {
       return res.status(404).json({ message: "User not found" });
     }
+
+    await logActivity({
+      req,
+      action: "user_deleted",
+      resourceType: "User",
+      resourceId: deletedUser._id,
+      details: {
+        targetName: deletedUser.name,
+        targetEmail: deletedUser.email,
+        targetRole: deletedUser.role,
+      },
+    });
+
     res.json({ message: "User deleted successfully" });
   } catch (error) {
     res.status(500).json({ message: "Failed to delete user", error: error.message });
@@ -329,10 +385,110 @@ const deleteUserByEmail = async (req, res) => {
       return res.status(404).json({ message: "User not found" });
     }
 
+    await logActivity({
+      req,
+      action: "user_deleted",
+      resourceType: "User",
+      resourceId: deletedUser._id,
+      details: {
+        targetName: deletedUser.name,
+        targetEmail: deletedUser.email,
+        targetRole: deletedUser.role,
+      },
+    });
+
     res.json({ message: "User deleted successfully" });
   } catch (error) {
     res.status(500).json({ message: "Failed to delete user", error: error.message });
   }
 };
 
-module.exports = { getUsers, createInvestigator, updateUser, deleteUser, deleteUserByEmail };
+const ACCOUNT_STATUSES = [
+  "active",
+  "warning",
+  "under_review",
+  "suspended",
+  "blocked",
+];
+
+/**
+ * Admin manually sets account discipline status (after reviewing flags).
+ */
+const updateAccountStatus = async (req, res) => {
+  try {
+    const { account_status, clearFlag } = req.body;
+    const normalized = String(account_status || "")
+      .trim()
+      .toLowerCase();
+
+    if (!ACCOUNT_STATUSES.includes(normalized)) {
+      return res.status(400).json({
+        message: `account_status must be one of: ${ACCOUNT_STATUSES.join(", ")}`,
+      });
+    }
+
+    const user = await User.findById(req.params.id);
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    if (["admin", "investigator"].includes(user.role)) {
+      return res.status(400).json({
+        message: "Cannot apply false-report sanctions to staff accounts",
+      });
+    }
+
+    user.account_status = normalized;
+    if (normalized === "blocked" || normalized === "suspended") {
+      user.status = "inactive";
+    } else if (normalized === "active") {
+      user.status = "active";
+    }
+
+    if (clearFlag || normalized === "active") {
+      if (clearFlag) {
+        user.is_flagged = false;
+        user.flag_reason = null;
+        user.flagged_by = null;
+        user.flagged_at = null;
+      }
+    }
+
+    await user.save();
+
+    await logActivity({
+      req,
+      action: "account_sanctioned",
+      resourceType: "User",
+      resourceId: user._id,
+      details: {
+        account_status: normalized,
+        false_report_count: user.false_report_count,
+        manual: true,
+      },
+    });
+
+    const safeUser = await User.findById(user._id)
+      .select("-password")
+      .populate("flagged_by", "name email role");
+
+    res.json({
+      message: `Account status updated to ${normalized}`,
+      user: safeUser,
+    });
+  } catch (error) {
+    res.status(500).json({
+      message: "Failed to update account status",
+      error: error.message,
+    });
+  }
+};
+
+module.exports = {
+  getUsers,
+  createInvestigator,
+  updateUser,
+  deleteUser,
+  deleteUserByEmail,
+  updateAccountStatus,
+};

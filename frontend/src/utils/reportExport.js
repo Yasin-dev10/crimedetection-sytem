@@ -1,5 +1,6 @@
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
+import API from "../api";
 
 const BRAND = "BAREAI";
 const COLORS = {
@@ -19,7 +20,9 @@ function formatReportType(type) {
     individual: "Blacklist",
     monthly: "Monthly",
     weekly: "Weekly",
+    "crime-cases": "Crime Cases",
     "investigator-activity": "Investigator Activity",
+    "my-work": "My Work",
     "fake-crimes-full": "Fake Crimes Full",
     "fake-crimes-individual": "Fake Crime Individual",
   };
@@ -31,6 +34,30 @@ function isFakeCrimesReport(report) {
     report?.reportType === "fake-crimes-full"
     || report?.reportType === "fake-crimes-individual"
   );
+}
+
+function isMyWorkReport(report) {
+  return report?.reportType === "my-work";
+}
+
+function isInvestigatorActivityReport(report) {
+  return report?.reportType === "investigator-activity";
+}
+
+function isCrimeCasesReport(report) {
+  return report?.reportType === "crime-cases";
+}
+
+function formatCrimeCaseStatus(status) {
+  const labels = {
+    pending: "Pending",
+    investigating: "Under Investigation",
+    crime_case: "Confirmed Crime",
+    not_crime: "False Positive",
+    resolved: "Resolved",
+    archived: "Archived",
+  };
+  return labels[status] || String(status || "—");
 }
 
 function formatExportDate(value) {
@@ -221,10 +248,114 @@ function buildFakeCrimesReportRows(report) {
   return rows;
 }
 
+function formatReportPeriod(period) {
+  if (!period) return "—";
+  if (typeof period === "string") return period;
+  if (period.label) return period.label;
+  if (period.from || period.to) {
+    return `${period.from || ""} → ${period.to || ""}`.trim();
+  }
+  return "—";
+}
+
+function buildCrimeCasesReportSections(report) {
+  const stats = report.stats || {};
+  return {
+    meta: {
+      brand: BRAND,
+      title: "Crime Cases Report",
+      reportType: formatReportType(report.reportType),
+      periodType: report.periodType || "—",
+      period: formatReportPeriod(report.period),
+      generatedAt: report.generatedAt
+        ? new Date(report.generatedAt).toLocaleString()
+        : "—",
+    },
+    stats: [
+      { label: "Total Cases", value: stats.totalCases ?? 0, tone: "primary" },
+      { label: "Confirmed Crimes", value: stats.confirmedCrimes ?? 0, tone: "crime" },
+      { label: "Under Investigation", value: stats.underInvestigation ?? 0, tone: "primary" },
+      { label: "False Positives", value: stats.falsePositives ?? 0, tone: "safe" },
+      { label: "Resolved", value: stats.resolved ?? 0, tone: "safe" },
+      { label: "Archived", value: stats.archived ?? 0, tone: "primary" },
+    ],
+    statusBreakdown: report.statusBreakdown || [],
+    cases: (report.cases || []).map((c) => ({
+      id: c._id || "—",
+      status: formatCrimeCaseStatus(c.status),
+      category: c.category || "—",
+      officer: c.assignedOfficer?.name || "Unassigned",
+      source: c.history?.sourceType || "—",
+      confidence: c.history?.confidence != null ? `${c.history.confidence}%` : "—",
+      createdAt: formatExportDate(c.createdAt),
+      resolvedAt: formatExportDate(c.resolvedAt),
+      content: (c.history?.content || "").replace(/\s+/g, " ").trim().slice(0, 200),
+      url: c.history?.url || "—",
+    })),
+  };
+}
+
+function buildCrimeCasesReportRows(report) {
+  const s = buildCrimeCasesReportSections(report);
+  const rows = [
+    ["Report Type", s.meta.reportType],
+    ["Period Type", s.meta.periodType],
+    ["Period", s.meta.period],
+    ["Generated", s.meta.generatedAt],
+    [],
+    ["SUMMARY STATS"],
+    ["Metric", "Value"],
+  ];
+  s.stats.forEach((item) => rows.push([item.label, item.value]));
+
+  if (s.statusBreakdown.length) {
+    rows.push([], ["STATUS BREAKDOWN"], ["Status", "Count"]);
+    s.statusBreakdown.forEach((item) =>
+      rows.push([formatCrimeCaseStatus(item.status), item.count])
+    );
+  }
+
+  if (s.cases.length) {
+    rows.push(
+      [],
+      ["CASES"],
+      [
+        "Case ID",
+        "Status",
+        "Category",
+        "Officer",
+        "Source",
+        "Confidence",
+        "Created",
+        "Resolved",
+        "Content",
+        "URL",
+      ]
+    );
+    s.cases.forEach((c) =>
+      rows.push([
+        c.id,
+        c.status,
+        c.category,
+        c.officer,
+        c.source,
+        c.confidence,
+        c.createdAt,
+        c.resolvedAt,
+        c.content,
+        c.url,
+      ])
+    );
+  }
+
+  return rows;
+}
+
 function buildInvestigatorActivityRows(report) {
+  const periodLabel = formatReportPeriod(report.period);
   const rows = [
     ["Report Type", formatReportType(report.reportType)],
-    ["Period", report.period || "—"],
+    ["Period", periodLabel],
     ["Generated", report.generatedAt ? new Date(report.generatedAt).toLocaleString() : "—"],
     [],
     ["SUMMARY STATS"],
@@ -275,6 +406,105 @@ function buildInvestigatorActivityRows(report) {
   return rows;
 }
 
+const MY_WORK_CASE_HEADERS = [
+  "Case ID",
+  "Status",
+  "Source",
+  "URL",
+  "Content",
+  "Findings",
+  "Recommendation",
+  "Updated",
+];
+
+function buildMyWorkReportSections(report) {
+  const inv = report.investigator || {};
+  return {
+    meta: {
+      brand: BRAND,
+      title: "My Work Report",
+      reportType: "My Work",
+      period: formatReportPeriod(report.period) || "Your assigned investigation work",
+      generatedAt: report.generatedAt
+        ? new Date(report.generatedAt).toLocaleString()
+        : "—",
+      investigator: {
+        name: inv.name || "—",
+        email: inv.email || "—",
+        badge: inv.badgeNumber || "—",
+        station: inv.station || "—",
+      },
+    },
+    stats: [
+      { label: "Total Cases", value: report.stats?.totalCases ?? 0, tone: "primary" },
+      { label: "Open", value: report.stats?.open ?? 0, tone: "primary" },
+      { label: "Investigating", value: report.stats?.investigating ?? 0, tone: "primary" },
+      { label: "Crime", value: report.stats?.crime ?? 0, tone: "crime" },
+      { label: "Not Crime", value: report.stats?.notCrime ?? 0, tone: "safe" },
+      { label: "Resolved", value: report.stats?.resolved ?? 0, tone: "safe" },
+      { label: "Formal Reports", value: report.stats?.formalReports ?? 0, tone: "primary" },
+    ],
+    cases: (report.cases || []).map((c) => ({
+      id: c.id || "—",
+      status: c.status || "—",
+      source: c.source || "—",
+      url: c.url || "",
+      content: String(c.content || c.contentPreview || "").replace(/\s+/g, " ").trim(),
+      findings: String(c.findings || "").replace(/\s+/g, " ").trim(),
+      recommendation: String(c.recommendation || "").replace(/\s+/g, " ").trim(),
+      updated: formatExportDate(c.updatedAt || c.resolvedAt),
+    })),
+    formalReports: (report.investigationReports || []).map((r) => ({
+      title: r.title || "—",
+      status: r.status || "—",
+      caseId: r.caseId || "—",
+      updated: formatExportDate(r.updatedAt),
+    })),
+  };
+}
+
+function myWorkCaseToArray(row) {
+  return [
+    row.id,
+    row.status,
+    row.source,
+    row.url || "—",
+    row.content,
+    row.findings,
+    row.recommendation,
+    row.updated,
+  ];
+}
+
+function buildMyWorkReportRows(report) {
+  const s = buildMyWorkReportSections(report);
+  const rows = [
+    ["Report Type", s.meta.reportType],
+    ["Period", s.meta.period],
+    ["Generated", s.meta.generatedAt],
+    ["Investigator", s.meta.investigator.name],
+    ["Email", s.meta.investigator.email],
+    ["Badge", s.meta.investigator.badge],
+    ["Station", s.meta.investigator.station],
+    [],
+    ["SUMMARY STATS"],
+    ["Metric", "Value"],
+  ];
+  s.stats.forEach((item) => rows.push([item.label, item.value]));
+
+  rows.push([], ["CASES"], MY_WORK_CASE_HEADERS);
+  s.cases.forEach((c) => rows.push(myWorkCaseToArray(c)));
+
+  if (s.formalReports.length) {
+    rows.push([], ["INVESTIGATION REPORTS"], ["Title", "Status", "Case ID", "Updated"]);
+    s.formalReports.forEach((r) =>
+      rows.push([r.title, r.status, r.caseId, r.updated])
+    );
+  }
+
+  return rows;
+}
+
 function escapeHtml(value) {
   return String(value ?? "")
     .replace(/&/g, "&amp;")
@@ -293,7 +523,7 @@ function getBlacklistLabel(record) {
 }
 
 function getReportFileBase(report) {
-  const period = String(report.period || "report")
+  const period = formatReportPeriod(report.period)
     .replace(/[^a-z0-9]+/gi, "_")
     .replace(/^_+|_+$/g, "")
     .slice(0, 60);
@@ -317,7 +547,7 @@ function buildReportSections(report) {
       brand: BRAND,
       title: `${formatReportType(report.reportType)} Analysis Report`,
       reportType: formatReportType(report.reportType),
-      period: report.period || "—",
+      period: formatReportPeriod(report.period),
       generatedAt: new Date(report.generatedAt).toLocaleString(),
       blacklistItem: report.blacklistItem || null,
     },
@@ -424,6 +654,196 @@ function kpiToneColor(tone) {
   return COLORS.primary;
 }
 
+function buildMyWorkExcelHtml(report) {
+  const s = buildMyWorkReportSections(report);
+
+  const kpiCells = s.stats
+    .slice(0, 4)
+    .map(
+      (item) => `
+        <td class="kpi-cell" style="border-color:${kpiToneColor(item.tone)}">
+          <div class="kpi-label">${escapeHtml(item.label)}</div>
+          <div class="kpi-value" style="color:${kpiToneColor(item.tone)}">${escapeHtml(item.value)}</div>
+        </td>`
+    )
+    .join("");
+
+  const moreStats = s.stats
+    .slice(4)
+    .map(
+      (item) =>
+        `<tr><td class="metric-label">${escapeHtml(item.label)}</td><td class="metric-value">${escapeHtml(item.value)}</td></tr>`
+    )
+    .join("");
+
+  const caseRows = s.cases
+    .map(
+      (row) =>
+        `<tr>${myWorkCaseToArray(row)
+          .map((cell) => `<td>${escapeHtml(cell)}</td>`)
+          .join("")}</tr>`
+    )
+    .join("");
+
+  const formalRows = s.formalReports
+    .map(
+      (r) =>
+        `<tr><td>${escapeHtml(r.title)}</td><td>${escapeHtml(r.status)}</td><td>${escapeHtml(r.caseId)}</td><td>${escapeHtml(r.updated)}</td></tr>`
+    )
+    .join("");
+
+  return `<!doctype html>
+<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel">
+<head>
+  <meta charset="utf-8" />
+  <title>${escapeHtml(s.meta.title)}</title>
+  <style>
+    body { font-family: Calibri, Arial, sans-serif; color: #0f172a; margin: 0; padding: 24px; background: #f8fafc; }
+    .report { max-width: 1200px; margin: 0 auto; background: #fff; border: 1px solid ${COLORS.border}; }
+    .header { background: ${COLORS.primaryDark}; color: #fff; padding: 28px 32px; }
+    .brand { font-size: 13px; letter-spacing: 0.22em; text-transform: uppercase; opacity: 0.85; }
+    .title { font-size: 28px; font-weight: 700; margin: 8px 0 4px; }
+    .subtitle { font-size: 15px; opacity: 0.92; }
+    .meta-line { font-size: 12px; opacity: 0.8; margin-top: 10px; }
+    .content { padding: 28px 32px 36px; }
+    .kpi-table { width: 100%; border-collapse: separate; border-spacing: 12px 0; margin: 0 0 24px; }
+    .kpi-cell { width: 25%; background: #f8fafc; border: 2px solid ${COLORS.primary}; border-radius: 12px; padding: 18px 16px; vertical-align: top; }
+    .kpi-label { font-size: 12px; color: ${COLORS.muted}; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 700; }
+    .kpi-value { font-size: 28px; font-weight: 700; margin-top: 8px; }
+    .meta-box { background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 10px; padding: 16px 18px; margin-bottom: 24px; font-size: 13px; line-height: 1.7; }
+    .section { margin-bottom: 28px; }
+    .section-title { font-size: 14px; font-weight: 700; color: ${COLORS.primaryDark}; text-transform: uppercase; letter-spacing: 0.08em; padding: 10px 14px; background: ${COLORS.sectionBg}; border-left: 4px solid ${COLORS.primary}; margin-bottom: 10px; }
+    .metric-table, .data-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+    .metric-table td, .data-table th, .data-table td { border: 1px solid ${COLORS.border}; padding: 8px 10px; vertical-align: top; }
+    .metric-label { background: #f8fafc; font-weight: 600; width: 40%; }
+    .metric-value { font-weight: 700; }
+    .data-table th { background: ${COLORS.primary}; color: #fff; text-align: left; font-weight: 700; }
+    .data-table tr:nth-child(even) td { background: #f8fafc; }
+    .footer { padding: 18px 32px 28px; border-top: 1px solid ${COLORS.border}; font-size: 11px; color: ${COLORS.muted}; }
+  </style>
+</head>
+<body>
+  <div class="report">
+    <div class="header">
+      <div class="brand">${escapeHtml(s.meta.brand)}</div>
+      <div class="title">${escapeHtml(s.meta.title)}</div>
+      <div class="subtitle">${escapeHtml(s.meta.period)}</div>
+      <div class="meta-line">Generated: ${escapeHtml(s.meta.generatedAt)}</div>
+    </div>
+    <div class="content">
+      <div class="meta-box">
+        <strong>Investigator:</strong> ${escapeHtml(s.meta.investigator.name)} ·
+        ${escapeHtml(s.meta.investigator.email)} ·
+        Badge ${escapeHtml(s.meta.investigator.badge)} ·
+        ${escapeHtml(s.meta.investigator.station)}
+      </div>
+      <table class="kpi-table"><tr>${kpiCells}</tr></table>
+      ${
+        moreStats
+          ? `<div class="section"><div class="section-title">More Stats</div><table class="metric-table">${moreStats}</table></div>`
+          : ""
+      }
+      <div class="section">
+        <div class="section-title">Cases</div>
+        <table class="data-table">
+          <thead><tr>${MY_WORK_CASE_HEADERS.map((h) => `<th>${escapeHtml(h)}</th>`).join("")}</tr></thead>
+          <tbody>${caseRows || `<tr><td colspan="8">No cases</td></tr>`}</tbody>
+        </table>
+      </div>
+      ${
+        formalRows
+          ? `<div class="section">
+              <div class="section-title">Investigation Reports</div>
+              <table class="data-table">
+                <thead><tr><th>Title</th><th>Status</th><th>Case ID</th><th>Updated</th></tr></thead>
+                <tbody>${formalRows}</tbody>
+              </table>
+            </div>`
+          : ""
+      }
+    </div>
+    <div class="footer">Confidential — ${escapeHtml(BRAND)} My Work Report.</div>
+  </div>
+</body>
+</html>`;
+}
+
+function buildInvestigatorActivityExcelHtml(report) {
+  const periodLabel = formatReportPeriod(report.period);
+  const generated = report.generatedAt
+    ? new Date(report.generatedAt).toLocaleString()
+    : "—";
+  const stats = [
+    ["Investigators", report.stats?.investigators ?? 0],
+    ["Total Cases", report.stats?.totalCases ?? 0],
+    ["Resolved Cases", report.stats?.resolvedCases ?? 0],
+    ["Unresolved Cases", report.stats?.unresolvedCases ?? 0],
+    ["Resolved In Period", report.stats?.resolvedInPeriod ?? 0],
+    ["Logged In In Period", report.stats?.loggedInInPeriod ?? 0],
+  ];
+  const invRows = (report.investigators || [])
+    .map(
+      (inv) => `<tr>
+        <td>${escapeHtml(inv.name || "—")}</td>
+        <td>${escapeHtml(inv.email || "—")}</td>
+        <td>${escapeHtml(inv.badgeNumber || "—")}</td>
+        <td>${escapeHtml(inv.station || "—")}</td>
+        <td>${escapeHtml(inv.status || "—")}</td>
+        <td>${escapeHtml(inv.totalCases ?? 0)}</td>
+        <td>${escapeHtml(inv.resolvedCases ?? 0)}</td>
+        <td>${escapeHtml(inv.unresolvedCases ?? 0)}</td>
+        <td>${escapeHtml(inv.resolvedInPeriod ?? 0)}</td>
+        <td>${escapeHtml(inv.loggedInInPeriod ? "Yes" : "No")}</td>
+        <td>${escapeHtml(inv.lastLoginAt ? new Date(inv.lastLoginAt).toLocaleString() : "—")}</td>
+        <td>${escapeHtml(inv.activityCount ?? (inv.activities || []).length)}</td>
+      </tr>`
+    )
+    .join("");
+
+  return `<!doctype html>
+<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel">
+<head>
+  <meta charset="utf-8" />
+  <title>Investigator Activity Report</title>
+  <style>
+    body { font-family: Calibri, Arial, sans-serif; color: #0f172a; margin: 0; padding: 24px; }
+    .header { background: ${COLORS.primaryDark}; color: #fff; padding: 24px 28px; }
+    .title { font-size: 24px; font-weight: 700; margin-top: 6px; }
+    .content { padding: 24px 28px; }
+    .section-title { font-weight: 700; margin: 18px 0 8px; color: ${COLORS.primaryDark}; }
+    table { width: 100%; border-collapse: collapse; font-size: 11px; }
+    th, td { border: 1px solid ${COLORS.border}; padding: 8px; text-align: left; }
+    th { background: ${COLORS.primary}; color: #fff; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div>${escapeHtml(BRAND)}</div>
+    <div class="title">Investigator Activity Report</div>
+    <div>${escapeHtml(periodLabel)} · Generated ${escapeHtml(generated)}</div>
+  </div>
+  <div class="content">
+    <div class="section-title">Summary</div>
+    <table>
+      <thead><tr><th>Metric</th><th>Value</th></tr></thead>
+      <tbody>${stats.map(([k, v]) => `<tr><td>${escapeHtml(k)}</td><td>${escapeHtml(v)}</td></tr>`).join("")}</tbody>
+    </table>
+    <div class="section-title">Investigators</div>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th><th>Email</th><th>Badge</th><th>Station</th><th>Status</th>
+          <th>Total</th><th>Resolved</th><th>Unresolved</th><th>Resolved In Period</th>
+          <th>Logged In</th><th>Last Login</th><th>Activity</th>
+        </tr>
+      </thead>
+      <tbody>${invRows || "<tr><td colspan='12'>No investigators</td></tr>"}</tbody>
+    </table>
+  </div>
+</body>
+</html>`;
+}
+
 function buildFakeCrimesExcelHtml(report) {
   const s = buildFakeCrimesReportSections(report);
 
@@ -526,9 +946,193 @@ function buildFakeCrimesExcelHtml(report) {
 </html>`;
 }
 
+function buildCrimeCasesExcelHtml(report) {
+  const s = buildCrimeCasesReportSections(report);
+  const kpiCells = s.stats
+    .slice(0, 4)
+    .map(
+      (item) => `
+        <td class="kpi-cell" style="border-color:${kpiToneColor(item.tone)}">
+          <div class="kpi-label">${escapeHtml(item.label)}</div>
+          <div class="kpi-value" style="color:${kpiToneColor(item.tone)}">${escapeHtml(item.value)}</div>
+        </td>`
+    )
+    .join("");
+
+  const statusRows = s.statusBreakdown
+    .map(
+      (item) =>
+        `<tr><td>${escapeHtml(formatCrimeCaseStatus(item.status))}</td><td>${escapeHtml(item.count)}</td></tr>`
+    )
+    .join("");
+
+  const caseRows = s.cases
+    .map(
+      (c) => `<tr>
+        <td>${escapeHtml(c.id)}</td>
+        <td>${escapeHtml(c.status)}</td>
+        <td>${escapeHtml(c.category)}</td>
+        <td>${escapeHtml(c.officer)}</td>
+        <td>${escapeHtml(c.source)}</td>
+        <td>${escapeHtml(c.confidence)}</td>
+        <td>${escapeHtml(c.createdAt)}</td>
+        <td>${escapeHtml(c.resolvedAt)}</td>
+        <td>${escapeHtml(c.content)}</td>
+      </tr>`
+    )
+    .join("");
+
+  return `<!doctype html>
+<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel">
+<head>
+  <meta charset="utf-8" />
+  <title>${escapeHtml(s.meta.title)}</title>
+  <style>
+    body { font-family: Calibri, Arial, sans-serif; color: #0f172a; margin: 0; padding: 24px; background: #f8fafc; }
+    .report { max-width: 1100px; margin: 0 auto; background: #fff; border: 1px solid ${COLORS.border}; }
+    .header { background: ${COLORS.primaryDark}; color: #fff; padding: 28px 32px; }
+    .brand { font-size: 13px; letter-spacing: 0.22em; text-transform: uppercase; opacity: 0.85; }
+    .title { font-size: 28px; font-weight: 700; margin: 8px 0 4px; }
+    .subtitle { font-size: 15px; opacity: 0.92; }
+    .content { padding: 28px 32px 36px; }
+    .kpi-table { width: 100%; border-collapse: separate; border-spacing: 12px; margin: 8px 0 24px; }
+    .kpi-cell { background: #f8fafc; border: 2px solid ${COLORS.primary}; border-radius: 10px; padding: 14px 16px; width: 25%; vertical-align: top; }
+    .kpi-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: ${COLORS.muted}; }
+    .kpi-value { font-size: 28px; font-weight: 700; margin-top: 6px; }
+    .section-title { font-size: 14px; font-weight: 700; color: ${COLORS.primaryDark}; margin: 22px 0 10px; text-transform: uppercase; letter-spacing: 0.06em; }
+    .data-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .data-table th { background: ${COLORS.primary}; color: #fff; text-align: left; padding: 8px 10px; }
+    .data-table td { border-bottom: 1px solid ${COLORS.border}; padding: 8px 10px; vertical-align: top; }
+    .footer { padding: 16px 32px; font-size: 11px; color: ${COLORS.muted}; border-top: 1px solid ${COLORS.border}; }
+  </style>
+</head>
+<body>
+  <div class="report">
+    <div class="header">
+      <div class="brand">${escapeHtml(BRAND)}</div>
+      <div class="title">${escapeHtml(s.meta.title)}</div>
+      <div class="subtitle">${escapeHtml(s.meta.period)} · ${escapeHtml(String(s.meta.periodType).toUpperCase())}</div>
+      <div style="margin-top:10px;font-size:12px;opacity:.85">Generated ${escapeHtml(s.meta.generatedAt)}</div>
+    </div>
+    <div class="content">
+      <table class="kpi-table"><tr>${kpiCells}</tr></table>
+      ${s.statusBreakdown.length ? `
+        <div class="section-title">Status Breakdown</div>
+        <table class="data-table"><thead><tr><th>Status</th><th>Count</th></tr></thead><tbody>${statusRows}</tbody></table>
+      ` : ""}
+      ${s.cases.length ? `
+        <div class="section-title">Cases</div>
+        <table class="data-table">
+          <thead><tr>
+            <th>Case ID</th><th>Status</th><th>Category</th><th>Officer</th>
+            <th>Source</th><th>Confidence</th><th>Created</th><th>Resolved</th><th>Content</th>
+          </tr></thead>
+          <tbody>${caseRows}</tbody>
+        </table>
+      ` : "<p>No cases found for this period.</p>"}
+    </div>
+    <div class="footer">Confidential — ${escapeHtml(BRAND)} Crime Cases Report.</div>
+  </div>
+</body>
+</html>`;
+}
+
+function buildCrimeCasesPdf(report) {
+  const sections = buildCrimeCasesReportSections(report);
+  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+  const pageWidth = doc.internal.pageSize.getWidth();
+
+  drawPdfHeader(
+    doc,
+    {
+      meta: {
+        brand: sections.meta.brand,
+        title: sections.meta.title,
+        reportType: sections.meta.reportType,
+        period: `${sections.meta.period} (${sections.meta.periodType})`,
+        generatedAt: sections.meta.generatedAt,
+      },
+    },
+    pageWidth
+  );
+
+  let y = 42;
+  autoTable(doc, {
+    startY: y,
+    theme: "grid",
+    head: [["Metric", "Value"]],
+    body: sections.stats.map((item) => [item.label, String(item.value)]),
+    styles: { fontSize: 9, cellPadding: 3 },
+    headStyles: { fillColor: [30, 58, 138], textColor: 255, fontStyle: "bold" },
+    columnStyles: {
+      0: { cellWidth: 70, fontStyle: "bold", textColor: [71, 85, 105] },
+      1: { cellWidth: 40, halign: "right", fontStyle: "bold" },
+    },
+    margin: { left: 14, right: 14 },
+  });
+  y = doc.lastAutoTable.finalY + 8;
+
+  if (sections.statusBreakdown.length) {
+    autoTable(doc, {
+      startY: y,
+      theme: "grid",
+      head: [["Status", "Count"]],
+      body: sections.statusBreakdown.map((item) => [
+        formatCrimeCaseStatus(item.status),
+        String(item.count),
+      ]),
+      styles: { fontSize: 8, cellPadding: 2.5 },
+      headStyles: { fillColor: [30, 58, 138], textColor: 255, fontStyle: "bold" },
+      margin: { left: 14, right: 14 },
+    });
+    y = doc.lastAutoTable.finalY + 8;
+  }
+
+  if (sections.cases.length) {
+    autoTable(doc, {
+      startY: y,
+      theme: "striped",
+      head: [["Status", "Category", "Officer", "Source", "Created", "Content"]],
+      body: sections.cases.map((c) => [
+        c.status,
+        c.category,
+        c.officer,
+        c.source,
+        c.createdAt,
+        c.content,
+      ]),
+      styles: { fontSize: 7, cellPadding: 2 },
+      headStyles: { fillColor: [30, 58, 138], textColor: 255, fontStyle: "bold" },
+      columnStyles: { 5: { cellWidth: 50 } },
+      margin: { left: 14, right: 14 },
+    });
+  }
+
+  const pageCount = doc.getNumberOfPages();
+  for (let i = 1; i <= pageCount; i += 1) {
+    doc.setPage(i);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    doc.setTextColor(100, 116, 139);
+    doc.text(`Page ${i} of ${pageCount}`, pageWidth - 28, 290);
+    doc.text("Confidential — BAREAI Crime Cases Report", 14, 290);
+  }
+
+  return doc.output("blob");
+}
+
 function buildExcelHtml(report) {
   if (isFakeCrimesReport(report)) {
     return buildFakeCrimesExcelHtml(report);
+  }
+  if (isMyWorkReport(report)) {
+    return buildMyWorkExcelHtml(report);
+  }
+  if (isInvestigatorActivityReport(report)) {
+    return buildInvestigatorActivityExcelHtml(report);
+  }
+  if (isCrimeCasesReport(report)) {
+    return buildCrimeCasesExcelHtml(report);
   }
 
   const s = buildReportSections(report);
@@ -690,6 +1294,179 @@ function addSectionTitle(doc, y, title) {
   return y + 12;
 }
 
+function buildMyWorkPdf(report) {
+  const sections = buildMyWorkReportSections(report);
+  const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  let y = 42;
+
+  drawPdfHeader(doc, sections, pageWidth);
+
+  doc.setTextColor(71, 85, 105);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  doc.text(
+    `Investigator: ${sections.meta.investigator.name}  |  ${sections.meta.investigator.email}  |  Badge ${sections.meta.investigator.badge}`,
+    14,
+    y
+  );
+  y += 8;
+
+  autoTable(doc, {
+    startY: y,
+    theme: "grid",
+    head: [["Metric", "Value"]],
+    body: sections.stats.map((item) => [item.label, String(item.value)]),
+    styles: { fontSize: 8, cellPadding: 2.5 },
+    headStyles: { fillColor: [61, 107, 140], textColor: 255, fontStyle: "bold" },
+    columnStyles: {
+      0: { cellWidth: 50, fontStyle: "bold", textColor: [71, 85, 105] },
+      1: { cellWidth: 30, halign: "right", fontStyle: "bold" },
+    },
+    margin: { left: 14, right: 14 },
+  });
+  y = doc.lastAutoTable.finalY + 8;
+
+  const addTable = (title, head, body, options = {}) => {
+    if (!body.length) return;
+    if (y > pageHeight - 40) {
+      doc.addPage();
+      drawPdfHeader(doc, sections, pageWidth);
+      y = 42;
+    }
+    doc.setFillColor(241, 245, 249);
+    doc.setDrawColor(61, 107, 140);
+    doc.setLineWidth(0.8);
+    doc.rect(14, y, pageWidth - 28, 8, "FD");
+    doc.line(14, y, 14, y + 8);
+    doc.setTextColor(30, 58, 95);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9);
+    doc.text(title.toUpperCase(), 18, y + 5.5);
+    y += 12;
+    autoTable(doc, {
+      startY: y,
+      theme: "grid",
+      head: [head],
+      body,
+      styles: { fontSize: 7, cellPadding: 2, overflow: "linebreak" },
+      headStyles: { fillColor: [61, 107, 140], textColor: 255, fontStyle: "bold" },
+      alternateRowStyles: { fillColor: [248, 250, 252] },
+      margin: { left: 14, right: 14 },
+      ...options,
+    });
+    y = doc.lastAutoTable.finalY + 8;
+  };
+
+  addTable(
+    "Cases",
+    MY_WORK_CASE_HEADERS,
+    sections.cases.map((row) => myWorkCaseToArray(row).map((cell) => String(cell ?? ""))),
+    {
+      columnStyles: {
+        3: { cellWidth: 40 },
+        4: { cellWidth: 55 },
+        5: { cellWidth: 35 },
+      },
+    }
+  );
+
+  addTable(
+    "Investigation Reports",
+    ["Title", "Status", "Case ID", "Updated"],
+    sections.formalReports.map((r) => [r.title, r.status, String(r.caseId), r.updated])
+  );
+
+  const pageCount = doc.getNumberOfPages();
+  for (let i = 1; i <= pageCount; i += 1) {
+    doc.setPage(i);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    doc.setTextColor(100, 116, 139);
+    doc.text(`Page ${i} of ${pageCount}`, pageWidth - 28, pageHeight - 8);
+    doc.text("Confidential — BAREAI My Work Report", 14, pageHeight - 8);
+  }
+
+  return doc.output("blob");
+}
+
+function buildInvestigatorActivityPdf(report) {
+  const sections = {
+    meta: {
+      brand: BRAND,
+      title: "Investigator Activity Report",
+      period: formatReportPeriod(report.period),
+      generatedAt: report.generatedAt
+        ? new Date(report.generatedAt).toLocaleString()
+        : "—",
+    },
+  };
+  const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  let y = 42;
+
+  drawPdfHeader(doc, sections, pageWidth);
+
+  autoTable(doc, {
+    startY: y,
+    theme: "grid",
+    head: [["Metric", "Value"]],
+    body: [
+      ["Investigators", String(report.stats?.investigators ?? 0)],
+      ["Total Cases", String(report.stats?.totalCases ?? 0)],
+      ["Resolved Cases", String(report.stats?.resolvedCases ?? 0)],
+      ["Unresolved Cases", String(report.stats?.unresolvedCases ?? 0)],
+      ["Resolved In Period", String(report.stats?.resolvedInPeriod ?? 0)],
+      ["Logged In In Period", String(report.stats?.loggedInInPeriod ?? 0)],
+    ],
+    styles: { fontSize: 8, cellPadding: 2.5 },
+    headStyles: { fillColor: [61, 107, 140], textColor: 255, fontStyle: "bold" },
+    margin: { left: 14, right: 14 },
+  });
+  y = doc.lastAutoTable.finalY + 8;
+
+  autoTable(doc, {
+    startY: y,
+    theme: "grid",
+    head: [[
+      "Name", "Email", "Badge", "Station", "Status",
+      "Total", "Resolved", "Unresolved", "In Period", "Logged In", "Last Login", "Activity",
+    ]],
+    body: (report.investigators || []).map((inv) => [
+      inv.name || "—",
+      inv.email || "—",
+      inv.badgeNumber || "—",
+      inv.station || "—",
+      inv.status || "—",
+      String(inv.totalCases ?? 0),
+      String(inv.resolvedCases ?? 0),
+      String(inv.unresolvedCases ?? 0),
+      String(inv.resolvedInPeriod ?? 0),
+      inv.loggedInInPeriod ? "Yes" : "No",
+      inv.lastLoginAt ? new Date(inv.lastLoginAt).toLocaleString() : "—",
+      String(inv.activityCount ?? (inv.activities || []).length),
+    ]),
+    styles: { fontSize: 7, cellPadding: 2, overflow: "linebreak" },
+    headStyles: { fillColor: [61, 107, 140], textColor: 255, fontStyle: "bold" },
+    alternateRowStyles: { fillColor: [248, 250, 252] },
+    margin: { left: 14, right: 14 },
+  });
+
+  const pageCount = doc.getNumberOfPages();
+  for (let i = 1; i <= pageCount; i += 1) {
+    doc.setPage(i);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    doc.setTextColor(100, 116, 139);
+    doc.text(`Page ${i} of ${pageCount}`, pageWidth - 28, pageHeight - 8);
+    doc.text("Confidential — BAREAI Investigator Activity", 14, pageHeight - 8);
+  }
+
+  return doc.output("blob");
+}
+
 function buildFakeCrimesPdf(report) {
   const sections = buildFakeCrimesReportSections(report);
   const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
@@ -803,6 +1580,15 @@ function buildFakeCrimesPdf(report) {
 function buildPdf(report) {
   if (isFakeCrimesReport(report)) {
     return buildFakeCrimesPdf(report);
+  }
+  if (isMyWorkReport(report)) {
+    return buildMyWorkPdf(report);
+  }
+  if (isInvestigatorActivityReport(report)) {
+    return buildInvestigatorActivityPdf(report);
+  }
+  if (isCrimeCasesReport(report)) {
+    return buildCrimeCasesPdf(report);
   }
 
   const sections = buildReportSections(report);
@@ -930,10 +1716,14 @@ function buildPdf(report) {
 
 export function exportReportCSV(report) {
   let rows;
-  if (report?.reportType === "investigator-activity") {
+  if (isMyWorkReport(report)) {
+    rows = buildMyWorkReportRows(report);
+  } else if (isInvestigatorActivityReport(report)) {
     rows = buildInvestigatorActivityRows(report);
   } else if (isFakeCrimesReport(report)) {
     rows = buildFakeCrimesReportRows(report);
+  } else if (isCrimeCasesReport(report)) {
+    rows = buildCrimeCasesReportRows(report);
   } else {
     rows = buildReportRows(report);
   }
@@ -941,6 +1731,7 @@ export function exportReportCSV(report) {
     .map((r) => r.map((v) => `"${String(v ?? "").replace(/"/g, '""')}"`).join(","))
     .join("\n");
   downloadBlob(csv, `${getReportFileBase(report)}.csv`, "text/csv;charset=utf-8");
+  void logReportExport("csv", report);
 }
 
 export function exportReportExcel(report) {
@@ -950,11 +1741,27 @@ export function exportReportExcel(report) {
     `${getReportFileBase(report)}.xls`,
     "application/vnd.ms-excel;charset=utf-8"
   );
+  void logReportExport("excel", report);
 }
 
 export function exportReportPDF(report) {
   const pdfBlob = buildPdf(report);
   downloadBlob(pdfBlob, `${getReportFileBase(report)}.pdf`, "application/pdf");
+  void logReportExport("pdf", report);
+}
+
+async function logReportExport(format, report) {
+  try {
+    await API.post("/audit-logs/events", {
+      action: "report_exported",
+      details: {
+        format,
+        reportType: report?.reportType || null,
+      },
+    });
+  } catch {
+    // Best-effort — never block export on audit logging
+  }
 }
 
 export { buildReportRows, getReportFileBase, buildFakeCrimesReportRows, isFakeCrimesReport };

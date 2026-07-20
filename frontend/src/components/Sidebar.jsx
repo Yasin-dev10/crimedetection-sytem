@@ -10,6 +10,7 @@ import {
   BrainCircuit,
   FileBarChart2,
   Shield,
+  ScrollText,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import API, { clearStoredSession } from "../api";
@@ -25,6 +26,7 @@ const menu = [
       { name: "Case Management", path: "/cases", icon: ListChecks, roles: ["admin", "investigator"] },
       { name: "Analysis", path: "/analysis", icon: BrainCircuit, roles: ["user"] },
       { name: "Reports", path: "/reports", icon: FileBarChart2, roles: ["admin", "investigator"] },
+      { name: "Audit Logs", path: "/audit-logs", icon: ScrollText, roles: ["admin"] },
       { name: "Profile", path: "/profile", icon: UserCircle, roles: ["admin", "investigator", "user"] },
       { name: "Settings", path: "/settings", icon: Settings, roles: ["admin", "investigator"] },
     ],

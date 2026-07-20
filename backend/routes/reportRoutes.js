@@ -6,20 +6,27 @@ const {
   generalReport,
   monthlyReport,
   weeklyReport,
+  crimeCasesReport,
   investigatorActivityReport,
   myInvestigatorActivityReport,
+  myWorkReport,
   fakeCrimesReport,
 } = require("../controllers/reportController");
 
 // All report endpoints require login + investigator or admin role
 router.use(protect, investigatorOrAdmin);
 
-router.get("/fake-crimes", fakeCrimesReport); // GET /api/reports/fake-crimes?threshold=&blacklistId=
-router.get("/individual", individualReport); // GET /api/reports/individual?blacklistId=...
-router.get("/general", generalReport);     // GET /api/reports/general
-router.get("/monthly", monthlyReport);     // GET /api/reports/monthly?year=&month=
-router.get("/weekly", weeklyReport);       // GET /api/reports/weekly
-router.get("/my-activity", myInvestigatorActivityReport); // GET /api/reports/my-activity?from=&to= (investigator only)
-router.get("/investigator-activity", adminOnly, investigatorActivityReport); // GET /api/reports/investigator-activity?from=&to= (admin only)
+// System-wide aggregate reports — Admin only
+router.get("/fake-crimes", adminOnly, fakeCrimesReport);
+router.get("/individual", adminOnly, individualReport);
+router.get("/general", adminOnly, generalReport);
+router.get("/monthly", adminOnly, monthlyReport);
+router.get("/weekly", adminOnly, weeklyReport);
+router.get("/crime-cases", adminOnly, crimeCasesReport);
+
+// Investigator: own work only
+router.get("/my-work", myWorkReport);
+router.get("/my-activity", myInvestigatorActivityReport);
+router.get("/investigator-activity", adminOnly, investigatorActivityReport);
 
 module.exports = router;

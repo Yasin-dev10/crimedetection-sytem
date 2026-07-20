@@ -113,6 +113,18 @@ function DetailInfoItem({ icon: Icon, label, value }) {
   );
 }
 
+function formatAccountStatus(status) {
+  return (
+    {
+      active: 'Active',
+      warning: 'Warning',
+      under_review: 'Under Review',
+      suspended: 'Suspended',
+      blocked: 'Blocked',
+    }[status] || status || 'Active'
+  );
+}
+
 function UserDetailsView({
   user,
   getImageUrl,
@@ -121,10 +133,18 @@ function UserDetailsView({
   onDelete,
   onVerifyOtp,
   onAddUser,
+  onUpdateAccountStatus,
 }) {
   const borderColor = 'var(--border-base)';
   const cardBg = 'var(--bg-card)';
   const muted = 'var(--text-muted)';
+  const [sanctionStatus, setSanctionStatus] = useState(user.account_status || 'active');
+  const [sanctionSaving, setSanctionSaving] = useState(false);
+
+  useEffect(() => {
+    setSanctionStatus(user.account_status || 'active');
+  }, [user._id, user.account_status]);
+
   const roleTitle =
     user.role === 'admin'
       ? 'Administrator'
@@ -143,24 +163,45 @@ function UserDetailsView({
     },
     {
       title: 'Account',
-      value: user.emailVerified ? 'Verified' : 'Pending',
+      value: formatAccountStatus(user.account_status),
       icon: LogIn,
-      bar: user.emailVerified ? '#10b981' : '#f59e0b',
-      soft: user.emailVerified ? 'rgba(16, 185, 129, 0.12)' : 'rgba(245, 158, 11, 0.12)',
-      iconColor: user.emailVerified ? '#34d399' : '#fbbf24',
+      bar:
+        user.account_status === 'blocked' || user.account_status === 'suspended'
+          ? '#ef4444'
+          : user.emailVerified
+            ? '#10b981'
+            : '#f59e0b',
+      soft:
+        user.account_status === 'blocked' || user.account_status === 'suspended'
+          ? 'rgba(239, 68, 68, 0.12)'
+          : user.emailVerified
+            ? 'rgba(16, 185, 129, 0.12)'
+            : 'rgba(245, 158, 11, 0.12)',
+      iconColor:
+        user.account_status === 'blocked' || user.account_status === 'suspended'
+          ? '#f87171'
+          : user.emailVerified
+            ? '#34d399'
+            : '#fbbf24',
     },
     {
-      title: 'Station',
-      value: user.station || 'Not set',
-      icon: Building2,
-      bar: '#3b82f6',
-      soft: 'rgba(59, 130, 246, 0.12)',
-      iconColor: '#60a5fa',
+      title: 'False Reports',
+      value: String(user.false_report_count ?? 0),
+      icon: Shield,
+      bar: (user.false_report_count || 0) > 0 ? '#f97316' : '#3b82f6',
+      soft:
+        (user.false_report_count || 0) > 0
+          ? 'rgba(249, 115, 22, 0.12)'
+          : 'rgba(59, 130, 246, 0.12)',
+      iconColor: (user.false_report_count || 0) > 0 ? '#fb923c' : '#60a5fa',
     },
   ];
 
   const overviewRows = [
-    { label: 'Account Status', value: user.status === 'inactive' ? 'Inactive' : 'Active' },
+    { label: 'Discipline Status', value: formatAccountStatus(user.account_status) },
+    { label: 'System Status', value: user.status === 'inactive' ? 'Inactive' : 'Active' },
+    { label: 'Flagged', value: user.is_flagged ? 'Yes' : 'No' },
+    { label: 'False Report Count', value: String(user.false_report_count ?? 0) },
     { label: 'Email Verified', value: user.emailVerified ? 'Yes' : 'No — OTP pending' },
     { label: 'Password Change', value: user.isPasswordChangeRequired ? 'Required at next login' : 'Up to date' },
     { label: 'Badge Number', value: user.badgeNumber || '—' },
@@ -373,6 +414,85 @@ function UserDetailsView({
           </button>
         </div>
 
+        {user.role === 'user' && (
+          <div
+            className="rounded-2xl border p-5 xl:col-span-12"
+            style={{ backgroundColor: cardBg, borderColor, boxShadow: 'var(--shadow-card)' }}
+          >
+            <h3 className="mb-1 text-base font-bold" style={{ color: 'var(--text-primary)' }}>
+              False Report Sanctions
+            </h3>
+            <p className="mb-4 text-sm" style={{ color: 'var(--text-secondary)' }}>
+              Investigators only flag reports. Admins confirm and apply warning, under review, suspension, or block.
+              Policy guide: 1 = Warning · 2 = Under review · 3 = Suspended · 5 = Blocked.
+            </p>
+
+            {user.flag_reason && (
+              <div
+                className="mb-4 rounded-xl border px-3.5 py-3 text-sm"
+                style={{
+                  backgroundColor: 'var(--bg-elevated)',
+                  borderColor: 'var(--border-soft)',
+                  color: 'var(--text-secondary)',
+                }}
+              >
+                <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>
+                  Latest flag reason:{' '}
+                </span>
+                {user.flag_reason}
+                {user.flagged_by?.name && (
+                  <span className="mt-1 block text-xs" style={{ color: muted }}>
+                    Flagged by {user.flagged_by.name}
+                    {user.flagged_at ? ` · ${formatFullDate(user.flagged_at)}` : ''}
+                  </span>
+                )}
+              </div>
+            )}
+
+            <div className="flex flex-wrap items-end gap-3">
+              <div className="min-w-[200px] flex-1">
+                <label className="mb-1 block text-[11px] font-bold uppercase tracking-wide" style={{ color: muted }}>
+                  Account status
+                </label>
+                <select
+                  value={sanctionStatus}
+                  onChange={(e) => setSanctionStatus(e.target.value)}
+                  className="w-full rounded-xl border px-3 py-2.5 text-sm font-semibold"
+                  style={{
+                    backgroundColor: 'var(--bg-elevated)',
+                    borderColor: 'var(--border-soft)',
+                    color: 'var(--text-primary)',
+                  }}
+                >
+                  <option value="active">Active</option>
+                  <option value="warning">Warning</option>
+                  <option value="under_review">Under Review</option>
+                  <option value="suspended">Temporary Suspension</option>
+                  <option value="blocked">Blocked</option>
+                </select>
+              </div>
+              <button
+                type="button"
+                disabled={sanctionSaving || !onUpdateAccountStatus}
+                onClick={async () => {
+                  if (!onUpdateAccountStatus) return;
+                  setSanctionSaving(true);
+                  try {
+                    await onUpdateAccountStatus(user, sanctionStatus);
+                  } finally {
+                    setSanctionSaving(false);
+                  }
+                }}
+                className="inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold text-white transition-all hover:opacity-90 disabled:opacity-50"
+                style={{ backgroundColor: 'var(--brand)' }}
+              >
+                <Shield size={16} />
+                {sanctionSaving ? 'Saving…' : 'Apply Sanction'}
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Recent activity */}
         <div
           className="rounded-2xl border p-5 xl:col-span-7"
@@ -450,7 +570,8 @@ export default function UserManagement() {
     const verified = users.filter((u) => u.emailVerified).length;
     const admins = users.filter((u) => u.role === 'admin').length;
     const pending = users.filter((u) => !u.emailVerified).length;
-    return { total, verified, admins, pending };
+    const flagged = users.filter((u) => u.is_flagged || (u.false_report_count || 0) > 0).length;
+    return { total, verified, admins, pending, flagged };
   }, [users]);
 
   const filteredUsers = useMemo(() => {
@@ -706,6 +827,26 @@ export default function UserManagement() {
   };
 
   // ── DELETE ────────────────────────────────────────────────────────────────
+  const handleUpdateAccountStatus = async (user, account_status) => {
+    try {
+      setError('');
+      setSuccessMessage('');
+      const userId = getUserId(user);
+      const res = await API.patch(`/users/${userId}/account-status`, {
+        account_status,
+        clearFlag: account_status === 'active',
+      });
+      const updated = normalizeUser(res.data.user);
+      setUsers((prev) =>
+        prev.map((u) => (getUserId(u) === userId ? updated : u))
+      );
+      setSuccessMessage(res.data.message || 'Account status updated.');
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to update account status');
+    }
+  };
+
+  // ── DELETE ────────────────────────────────────────────────────────────────
   const confirmDelete = async () => {
     if (!deleteTarget) return;
     const deleteTargetId = getUserId(deleteTarget);
@@ -748,7 +889,7 @@ export default function UserManagement() {
   const summaryCards = [
     { title: 'Total Users', value: summary.total, icon: Users, bar: '#3b82f6', soft: 'rgba(59, 130, 246, 0.12)', iconColor: '#60a5fa' },
     { title: 'Active', value: summary.verified, icon: UserCheck, bar: '#10b981', soft: 'rgba(16, 185, 129, 0.12)', iconColor: '#34d399' },
-    { title: 'Admins', value: summary.admins, icon: Shield, bar: '#8b5cf6', soft: 'rgba(139, 92, 246, 0.12)', iconColor: '#a78bfa' },
+    { title: 'Flagged', value: summary.flagged, icon: Shield, bar: '#f97316', soft: 'rgba(249, 115, 22, 0.12)', iconColor: '#fb923c' },
     { title: 'Pending', value: summary.pending, icon: MessageSquare, bar: '#f59e0b', soft: 'rgba(245, 158, 11, 0.12)', iconColor: '#fbbf24' },
   ];
 
@@ -782,6 +923,7 @@ export default function UserManagement() {
             onDelete={setDeleteTarget}
             onVerifyOtp={(u) => openOtpModal(u, 'Enter the OTP sent to this user email.')}
             onAddUser={() => { setError(''); setSuccessMessage(''); setIsAddModalOpen(true); }}
+            onUpdateAccountStatus={handleUpdateAccountStatus}
           />
         </>
       ) : (

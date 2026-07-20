@@ -16,6 +16,7 @@ const notificationRoutes = require("./routes/notificationRoutes");
 const blacklistRoutes    = require("./routes/blacklistRoutes");
 const userRoutes         = require("./routes/userRoutes");
 const reportRoutes       = require("./routes/reportRoutes");
+const auditLogRoutes     = require("./routes/auditLogRoutes");
 
 connectDB();
 
@@ -35,6 +36,7 @@ app.use("/api/notifications", notificationRoutes);
 app.use("/api/blacklist",    blacklistRoutes);
 app.use("/api/users",        userRoutes);
 app.use("/api/reports",      reportRoutes);
+app.use("/api/audit-logs",   auditLogRoutes);
 
 app.get("/", (req, res) => {
   res.json({ message: "Crime Detection Backend Running" });

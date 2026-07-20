@@ -15,6 +15,7 @@ const {
   scanSingleWebsiteBlacklist,
   getWebsitePages,
   getFakeCrimeSubjects,
+  getReportFlags,
   getBlacklistStats,
 } = require("../controllers/blacklistController");
 
@@ -65,6 +66,13 @@ router.get(
   protect,
   investigatorOrAdmin,
   getFakeCrimeSubjects
+);
+
+router.get(
+  "/report-flags",
+  protect,
+  investigatorOrAdmin,
+  getReportFlags
 );
 
 router.get(
