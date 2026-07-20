@@ -12,7 +12,25 @@ const STATUS_LABELS = {
   investigating: "Investigating",
   crime_case: "Crime Case",
   not_crime: "Not Crime",
+  false_report: "False Report",
+  misleading_information: "Misleading",
+  malicious_report: "Malicious",
   archived: "Archived",
+};
+
+const parseDays = (raw) => {
+  if (raw === "all" || raw === "0") return null;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return 7;
+  return Math.min(Math.floor(n), 365);
+};
+
+const getDateRange = (days) => {
+  if (!days) return null;
+  const startDate = new Date();
+  startDate.setDate(startDate.getDate() - (days - 1));
+  startDate.setHours(0, 0, 0, 0);
+  return startDate;
 };
 
 const getUniqueHistoryCount = async (filter = {}) => {
@@ -29,8 +47,13 @@ const getUniqueHistoryCount = async (filter = {}) => {
 
 const getDashboardStats = async (req, res) => {
   try {
-    // Fix old data so Resolved never appears as its own final status.
     await migrateResolvedCases();
+
+    const days = parseDays(req.query.days);
+    const startDate = getDateRange(days);
+    const historyDateFilter = startDate ? { createdAt: { $gte: startDate } } : {};
+    const caseDateFilter = startDate ? { createdAt: { $gte: startDate } } : {};
+    const alertDateFilter = startDate ? { createdAt: { $gte: startDate } } : {};
 
     const [
       totalAnalysis,
@@ -43,20 +66,21 @@ const getDashboardStats = async (req, res) => {
       recentHistory,
       recentInvestigations,
     ] = await Promise.all([
-      getUniqueHistoryCount({}),
-      getUniqueHistoryCount({ isCrime: true }),
+      getUniqueHistoryCount(historyDateFilter),
+      getUniqueHistoryCount({ ...historyDateFilter, isCrime: true }),
       User.countDocuments(),
       User.countDocuments({ role: "investigator" }),
       BlacklistItem.countDocuments({ active: true }),
       BlacklistItem.countDocuments({ type: "facebook_page", active: true }),
       InvestigationCase.countDocuments({
         status: { $in: ["pending", "investigating"] },
+        ...caseDateFilter,
       }),
-      History.find()
+      History.find(historyDateFilter)
         .sort({ createdAt: -1 })
         .limit(5)
         .lean(),
-      InvestigationCase.find()
+      InvestigationCase.find(caseDateFilter)
         .sort({ createdAt: -1 })
         .limit(5)
         .populate("history"),
@@ -64,14 +88,13 @@ const getDashboardStats = async (req, res) => {
 
     const safeContent = Math.max(totalAnalysis - crimeDetected, 0);
 
-    const startDate = new Date();
-    startDate.setDate(startDate.getDate() - 6);
-    startDate.setHours(0, 0, 0, 0);
+    const trendDays = days || 7;
+    const trendStart = getDateRange(trendDays) || getDateRange(7);
 
     const historyTrend = await History.aggregate([
       {
         $match: {
-          createdAt: { $gte: startDate },
+          createdAt: { $gte: trendStart },
         },
       },
       {
@@ -96,13 +119,17 @@ const getDashboardStats = async (req, res) => {
     ]);
 
     const trendMap = {};
+    const points = Math.min(trendDays, 90);
 
-    for (let i = 0; i < 7; i += 1) {
-      const date = new Date(startDate);
-      date.setDate(startDate.getDate() + i);
+    for (let i = 0; i < points; i += 1) {
+      const date = new Date(trendStart);
+      date.setDate(trendStart.getDate() + i);
 
       trendMap[dayKey(date)] = {
-        day: date.toLocaleDateString("en-US", { weekday: "short" }),
+        day:
+          points <= 14
+            ? date.toLocaleDateString("en-US", { weekday: "short" })
+            : date.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
         crime: 0,
         safe: 0,
       };
@@ -119,11 +146,14 @@ const getDashboardStats = async (req, res) => {
     const [
       analysisTypes,
       caseStatus,
-      facebookMonitoring,
       topKeywords,
       blacklistCrimeChart,
+      falseReportCount,
     ] = await Promise.all([
       History.aggregate([
+        ...(Object.keys(historyDateFilter).length
+          ? [{ $match: historyDateFilter }]
+          : []),
         {
           $group: {
             _id: {
@@ -144,20 +174,30 @@ const getDashboardStats = async (req, res) => {
         {
           $match: {
             status: {
-              $in: ["pending", "investigating", "crime_case", "not_crime", "archived"],
+              $in: [
+                "pending",
+                "investigating",
+                "crime_case",
+                "not_crime",
+                "false_report",
+                "misleading_information",
+                "malicious_report",
+                "archived",
+              ],
             },
+            ...caseDateFilter,
           },
         },
         { $group: { _id: "$status", count: { $sum: 1 } } },
         { $sort: { count: -1 } },
       ]),
-      BlacklistItem.aggregate([
-        { $match: { type: "facebook_page" } },
-        { $group: { _id: "$lastScanStatus", count: { $sum: 1 } } },
-        { $sort: { count: -1 } },
-      ]),
       History.aggregate([
-        { $match: { matchedKeyword: { $nin: [null, ""] } } },
+        {
+          $match: {
+            matchedKeyword: { $nin: [null, ""] },
+            ...historyDateFilter,
+          },
+        },
         {
           $group: {
             _id: {
@@ -176,7 +216,12 @@ const getDashboardStats = async (req, res) => {
         { $limit: 8 },
       ]),
       BlacklistAlert.aggregate([
-        { $match: { history: { $ne: null } } },
+        {
+          $match: {
+            history: { $ne: null },
+            ...alertDateFilter,
+          },
+        },
         {
           $group: {
             _id: {
@@ -210,9 +255,17 @@ const getDashboardStats = async (req, res) => {
         },
         { $unwind: { path: "$item", preserveNullAndEmptyArrays: true } },
       ]),
+      InvestigationCase.countDocuments({
+        status: "false_report",
+        ...caseDateFilter,
+      }),
     ]);
 
     res.json({
+      period: {
+        days: days || "all",
+        from: startDate ? startDate.toISOString() : null,
+      },
       stats: {
         totalAnalysis,
         crimeDetected,
@@ -222,6 +275,7 @@ const getDashboardStats = async (req, res) => {
         blacklistTotal,
         facebookPages,
         activeCases,
+        falseReports: falseReportCount,
       },
 
       trend: Object.values(trendMap),
@@ -239,11 +293,6 @@ const getDashboardStats = async (req, res) => {
       caseStatus: caseStatus.map((item) => ({
         status: STATUS_LABELS[item._id] || item._id || "Unknown",
         key: item._id || "unknown",
-        count: item.count,
-      })),
-
-      facebookMonitoring: facebookMonitoring.map((item) => ({
-        status: item._id || "not_scanned",
         count: item.count,
       })),
 

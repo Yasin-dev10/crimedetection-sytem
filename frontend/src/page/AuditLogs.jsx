@@ -5,6 +5,8 @@ import {
   ChevronLeft,
   ChevronRight,
   Clock3,
+  Download,
+  FileText,
   Filter,
   Globe,
   RefreshCw,
@@ -12,6 +14,8 @@ import {
   Shield,
   XCircle,
 } from "lucide-react";
+import { jsPDF } from "jspdf";
+import autoTable from "jspdf-autotable";
 import API from "../api";
 import { getStoredUser } from "../theme";
 
@@ -115,6 +119,7 @@ export default function AuditLogs() {
   const [page, setPage] = useState(1);
   const [pagination, setPagination] = useState({ page: 1, limit: 25, total: 0, pages: 1 });
   const [loading, setLoading] = useState(true);
+  const [downloading, setDownloading] = useState(false);
   const [selected, setSelected] = useState(null);
   const [error, setError] = useState("");
 
@@ -180,6 +185,152 @@ export default function AuditLogs() {
     loadLogs();
   };
 
+  const buildFilterParams = (limit = 25, pageNum = 1) => {
+    const params = { page: pageNum, limit };
+    if (filters.search.trim()) params.search = filters.search.trim();
+    if (filters.module) params.module = filters.module;
+    if (filters.action) params.action = filters.action;
+    if (filters.status) params.status = filters.status;
+    if (filters.from) params.from = filters.from;
+    if (filters.to) params.to = filters.to;
+    return params;
+  };
+
+  const fetchExportRows = async () => {
+    const res = await API.get("/audit-logs", {
+      params: buildFilterParams(1000, 1),
+    });
+    return res.data?.items || [];
+  };
+
+  const downloadCsv = async () => {
+    try {
+      setDownloading(true);
+      setError("");
+      const rows = await fetchExportRows();
+      if (!rows.length) {
+        setError("No audit logs to download for the current filters.");
+        return;
+      }
+
+      const headers = [
+        "Date & Time",
+        "User",
+        "Email",
+        "Role",
+        "Action",
+        "Module",
+        "Description",
+        "Status",
+      ];
+      const csvRows = rows.map((log) => [
+        formatDateTime(log.createdAt),
+        log.user?.name || log.userName || "Unknown",
+        log.user?.email || "",
+        log.role || log.user?.role || "",
+        log.actionLabel || log.action || "",
+        log.module || "",
+        log.description || "",
+        log.status || "success",
+      ]);
+
+      const escapeCell = (value) => {
+        const text = String(value ?? "");
+        if (/[",\n\r]/.test(text)) {
+          return `"${text.replace(/"/g, '""')}"`;
+        }
+        return text;
+      };
+
+      const csv = [headers, ...csvRows]
+        .map((row) => row.map(escapeCell).join(","))
+        .join("\n");
+
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      const stamp = new Date().toISOString().slice(0, 10);
+      a.href = url;
+      a.download = `BAREAI-audit-logs-${stamp}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+
+      try {
+        await API.post("/audit-logs/events", {
+          action: "report_exported",
+          details: { reportType: "audit-logs", format: "csv", count: rows.length },
+        });
+      } catch {
+        // non-blocking
+      }
+    } catch (err) {
+      setError(err.response?.data?.message || "Failed to download CSV");
+    } finally {
+      setDownloading(false);
+    }
+  };
+
+  const downloadPdf = async () => {
+    try {
+      setDownloading(true);
+      setError("");
+      const rows = await fetchExportRows();
+      if (!rows.length) {
+        setError("No audit logs to download for the current filters.");
+        return;
+      }
+
+      const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
+      doc.setFontSize(16);
+      doc.setTextColor(30, 58, 138);
+      doc.text("BAREAI — Audit Logs", 40, 36);
+      doc.setFontSize(10);
+      doc.setTextColor(100, 116, 139);
+      doc.text(`Exported ${formatDateTime(new Date())} · ${rows.length} entries`, 40, 54);
+
+      autoTable(doc, {
+        startY: 68,
+        head: [["Date", "User", "Role", "Action", "Module", "Description", "Status"]],
+        body: rows.map((log) => [
+          formatDateTime(log.createdAt),
+          log.user?.name || log.userName || "Unknown",
+          log.role || log.user?.role || "—",
+          log.actionLabel || log.action || "—",
+          log.module || "—",
+          log.description || "—",
+          log.status || "success",
+        ]),
+        styles: { fontSize: 8, cellPadding: 4, overflow: "linebreak" },
+        headStyles: {
+          fillColor: [30, 58, 138],
+          textColor: 255,
+          fontStyle: "bold",
+        },
+        alternateRowStyles: { fillColor: [248, 250, 252] },
+        columnStyles: {
+          5: { cellWidth: 180 },
+        },
+        margin: { left: 40, right: 40 },
+      });
+
+      const stamp = new Date().toISOString().slice(0, 10);
+      doc.save(`BAREAI-audit-logs-${stamp}.pdf`);
+
+      try {
+        await API.post("/audit-logs/events", {
+          action: "report_exported",
+          details: { reportType: "audit-logs", format: "pdf", count: rows.length },
+        });
+      } catch {
+        // non-blocking
+      }
+    } catch (err) {
+      setError(err.response?.data?.message || "Failed to download PDF");
+    } finally {
+      setDownloading(false);
+    }
+  };
+
   return (
     <div className="min-w-0 max-w-full space-y-5">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -204,19 +355,45 @@ export default function AuditLogs() {
           </div>
         </div>
 
-        <button
-          type="button"
-          onClick={refresh}
-          className="inline-flex items-center gap-2 rounded-xl border px-3.5 py-2 text-sm font-semibold transition hover:opacity-90"
-          style={{
-            backgroundColor: "var(--bg-surface)",
-            borderColor: "var(--border-base)",
-            color: "var(--text-primary)",
-          }}
-        >
-          <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
-          Refresh
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={downloadCsv}
+            disabled={downloading || loading}
+            className="inline-flex items-center gap-2 rounded-xl border px-3.5 py-2 text-sm font-semibold transition hover:opacity-90 disabled:opacity-50"
+            style={{
+              backgroundColor: "var(--bg-surface)",
+              borderColor: "var(--border-base)",
+              color: "var(--text-primary)",
+            }}
+          >
+            <Download size={16} />
+            {downloading ? "Downloading…" : "Download CSV"}
+          </button>
+          <button
+            type="button"
+            onClick={downloadPdf}
+            disabled={downloading || loading}
+            className="inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
+            style={{ background: "var(--navy)" }}
+          >
+            <FileText size={16} />
+            Download PDF
+          </button>
+          <button
+            type="button"
+            onClick={refresh}
+            className="inline-flex items-center gap-2 rounded-xl border px-3.5 py-2 text-sm font-semibold transition hover:opacity-90"
+            style={{
+              backgroundColor: "var(--bg-surface)",
+              borderColor: "var(--border-base)",
+              color: "var(--text-primary)",
+            }}
+          >
+            <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
+            Refresh
+          </button>
+        </div>
       </div>
 
       <div className="grid gap-3 sm:grid-cols-3">

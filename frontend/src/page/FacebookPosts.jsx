@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import API from "../api";
 import { getStoredUser } from "../theme";
+import { renderCrimeHighlightedText } from "../utils/crimeHighlight";
 
 const CURRENT_YEAR = new Date().getFullYear();
 const YEARS = Array.from({ length: 7 }, (_, index) => CURRENT_YEAR - index);
@@ -252,7 +253,12 @@ export default function FacebookPosts() {
                   </div>
 
                   <p className="whitespace-pre-wrap text-sm leading-7 text-slate-300">
-                    {post.content}
+                    {post.isCrime
+                      ? renderCrimeHighlightedText(post.content, true, {
+                          matchedKeyword: post.matchedKeyword,
+                          blacklistMatches: post.blacklistMatches,
+                        })
+                      : post.content}
                   </p>
 
                   <div className="mt-4 flex flex-wrap gap-2">

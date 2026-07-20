@@ -423,8 +423,8 @@ function UserDetailsView({
               False Report Sanctions
             </h3>
             <p className="mb-4 text-sm" style={{ color: 'var(--text-secondary)' }}>
-              Investigators only flag reports. Admins confirm and apply warning, under review, suspension, or block.
-              Policy guide: 1 = Warning · 2 = Under review · 3 = Suspended · 5 = Blocked.
+              False-report flags apply sanctions automatically by policy. Admins can still adjust account status here.
+              Policy: 1 = Warning · 2 = Under review · 3 = Suspended · 5 = Blocked.
             </p>
 
             {user.flag_reason && (

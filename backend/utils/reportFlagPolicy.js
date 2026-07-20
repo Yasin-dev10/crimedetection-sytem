@@ -1,6 +1,6 @@
 /**
- * Suggested account_status from confirmed false-report flag count.
- * Investigators only flag; admins confirm and apply sanctions.
+ * Suggested account_status from false-report flag count.
+ * Applied automatically when an investigator flags a report.
  *
  * 1 flag  → warning
  * 2 flags → under_review

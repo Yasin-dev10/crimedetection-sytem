@@ -326,7 +326,7 @@ export default function Blacklist() {
       await loadBlacklist();
       setSuccess(
         isWebsite
-          ? "Website scanned. Open results or Notifications to send crime content to Case Management."
+          ? "Website scanned — 1 news article fetched. Open results or Notifications for crime content."
           : "Page scanned. Open posts or Notifications to send crime content to Case Management."
       );
     } catch (err) {
@@ -367,9 +367,10 @@ export default function Blacklist() {
   };
 
   const navBtn = (active) => ({
-    background: active ? "var(--brand)" : "var(--bg-card)",
-    color: active ? "var(--on-accent)" : "var(--text-secondary)",
-    border: `1px solid ${active ? "var(--brand)" : "var(--border-base)"}`,
+    background: active ? "var(--brand-soft)" : "var(--bg-card)",
+    color: active ? "var(--brand)" : "var(--text-secondary)",
+    border: `1px solid ${active ? "var(--brand-ring)" : "var(--border-base)"}`,
+    boxShadow: active ? "0 0 0 1px var(--brand-soft)" : "none",
   });
 
   return (
@@ -378,7 +379,7 @@ export default function Blacklist() {
       style={{ background: "var(--bg-base)", color: "var(--text-primary)" }}
     >
       <div className="mx-auto max-w-7xl">
-        <div className="mb-7 flex flex-col justify-between gap-4 lg:flex-row lg:items-center">
+        <div className="mb-7 flex flex-col gap-4">
           <div>
             <p
               className="text-[11px] font-semibold uppercase tracking-wider"
@@ -395,7 +396,7 @@ export default function Blacklist() {
                 ? "Blacklist Analytics & Insights"
                 : "All Blacklists"}
             </h1>
-           
+
             {success && (
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 <p className="text-sm font-medium" style={{ color: "var(--accent-success)" }}>
@@ -409,76 +410,91 @@ export default function Blacklist() {
             )}
           </div>
 
-          <div className="flex max-w-full flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={() => changeView("facebook")}
-              className="inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold transition-opacity hover:opacity-90"
-              style={navBtn(view === "facebook")}
-            >
-              <Users size={16} />
-              Facebook Scraping
-            </button>
-
-            <button
-              type="button"
-              onClick={() => changeView("website")}
-              className="inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold transition-opacity hover:opacity-90"
-              style={navBtn(view === "website")}
-            >
-              <Globe size={16} />
-              Website Scraping
-            </button>
-
-            <button
-              type="button"
-              onClick={() => changeView("statistics")}
-              className="inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold transition-opacity hover:opacity-90"
-              style={navBtn(view === "statistics")}
-            >
-              <BarChart3 size={16} />
-              Analytics
-            </button>
-
-            <button
-              type="button"
-              onClick={() => changeView("all")}
-              className="inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold transition-opacity hover:opacity-90"
-              style={navBtn(view === "all")}
-            >
-              <List size={16} />
-              All Blacklists
-            </button>
-
-            <button
-              type="button"
-              onClick={() => navigate("/blacklist/fake-crimes?tab=flags")}
-              className="inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold text-white transition-opacity hover:opacity-90"
+          <div className="flex flex-col gap-2.5 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+            <div
+              className="inline-flex max-w-full flex-wrap items-center gap-1 rounded-2xl border p-1"
               style={{
-                background: "var(--navy)",
-                border: "1px solid var(--navy)",
+                backgroundColor: "var(--bg-surface)",
+                borderColor: "var(--border-base)",
               }}
             >
-              <FileWarning size={16} />
-              Fake Crimes & Flags
-            </button>
-
-            {(view === "facebook" || view === "website") && (
               <button
                 type="button"
-                onClick={scanAllPages}
-                disabled={scanningAll}
-                className="inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold text-white disabled:opacity-60"
-                style={{ background: "var(--navy)" }}
+                onClick={() => changeView("facebook")}
+                className="inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-sm font-bold transition-opacity hover:opacity-90"
+                style={navBtn(view === "facebook")}
               >
-                <RefreshCw size={16} className={scanningAll ? "animate-spin" : ""} />
-                {scanningAll
-                  ? "Scanning All..."
-                  : view === "website"
-                  ? "Scan All Websites"
-                  : "Scan All Facebook"}
+                <Users size={16} />
+                Facebook Scraping
               </button>
-            )}
+
+              <button
+                type="button"
+                onClick={() => changeView("website")}
+                className="inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-sm font-bold transition-opacity hover:opacity-90"
+                style={navBtn(view === "website")}
+              >
+                <Globe size={16} />
+                Website Scraping
+              </button>
+
+              <button
+                type="button"
+                onClick={() => changeView("statistics")}
+                className="inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-sm font-bold transition-opacity hover:opacity-90"
+                style={navBtn(view === "statistics")}
+              >
+                <BarChart3 size={16} />
+                Analytics
+              </button>
+
+              <button
+                type="button"
+                onClick={() => changeView("all")}
+                className="inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-sm font-bold transition-opacity hover:opacity-90"
+                style={navBtn(view === "all")}
+              >
+                <List size={16} />
+                All Blacklists
+              </button>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => navigate("/blacklist/fake-crimes?tab=flags")}
+                className="inline-flex items-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-bold transition hover:opacity-90"
+                style={{
+                  background: "rgba(245, 158, 11, 0.12)",
+                  borderColor: "rgba(245, 158, 11, 0.35)",
+                  color: "#d97706",
+                }}
+              >
+                <FileWarning size={16} />
+                Fake Crimes & Flags
+              </button>
+
+              {(view === "facebook" || view === "website") && (
+                <button
+                  type="button"
+                  onClick={scanAllPages}
+                  disabled={scanningAll}
+                  className="inline-flex items-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-bold transition hover:opacity-90 disabled:opacity-60"
+                  style={{
+                    background: "var(--brand-soft)",
+                    borderColor: "var(--brand-ring)",
+                    color: "var(--brand)",
+                  }}
+                >
+                  <RefreshCw size={16} className={scanningAll ? "animate-spin" : ""} />
+                  {scanningAll
+                    ? "Scanning All..."
+                    : view === "website"
+                    ? "Scan All Websites"
+                    : "Scan All Facebook"}
+                </button>
+              )}
+            </div>
           </div>
         </div>
 
@@ -1059,17 +1075,17 @@ function ActionButton({
 }) {
   const styles = {
     primary: {
-      background: "var(--navy)",
-      color: "var(--on-accent)",
-      border: "1px solid var(--navy)",
+      background: "var(--brand-soft)",
+      color: "var(--brand)",
+      border: "1px solid var(--brand-ring)",
     },
     accent: {
-      background: "var(--brand)",
-      color: "var(--on-accent)",
-      border: "1px solid var(--brand)",
+      background: "var(--brand-soft)",
+      color: "var(--brand)",
+      border: "1px solid var(--brand-ring)",
     },
     ghost: {
-      background: "var(--bg-card)",
+      background: "var(--bg-elevated)",
       color: "var(--text-secondary)",
       border: "1px solid var(--border-base)",
     },
@@ -1531,8 +1547,9 @@ function HistoryMatchCard({ history }) {
             rel="noreferrer"
             className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-bold transition-opacity hover:opacity-85"
             style={{
-              background: "var(--brand)",
-              color: "var(--on-accent)",
+              background: "var(--brand-soft)",
+              color: "var(--brand)",
+              border: "1px solid var(--brand-ring)",
             }}
             title={history.url}
           >
@@ -1701,13 +1718,18 @@ function StatisticsView({ stats, loading, onDeleteItem, onViewDetails }) {
               onClick={openAll}
               className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-bold transition-opacity hover:opacity-85"
               style={{
-                background: listOpen && !showRemovableOnly ? "var(--brand)" : "var(--bg-surface)",
+                background:
+                  listOpen && !showRemovableOnly
+                    ? "var(--brand-soft)"
+                    : "var(--bg-surface)",
                 color:
                   listOpen && !showRemovableOnly
-                    ? "var(--on-accent)"
+                    ? "var(--brand)"
                     : "var(--text-secondary)",
                 border: `1px solid ${
-                  listOpen && !showRemovableOnly ? "var(--brand)" : "var(--border-base)"
+                  listOpen && !showRemovableOnly
+                    ? "var(--brand-ring)"
+                    : "var(--border-base)"
                 }`,
               }}
             >
@@ -1723,16 +1745,16 @@ function StatisticsView({ stats, loading, onDeleteItem, onViewDetails }) {
                 style={{
                   background:
                     listOpen && showRemovableOnly
-                      ? "var(--accent-danger)"
+                      ? "var(--accent-danger-soft)"
                       : "var(--bg-surface)",
                   color:
                     listOpen && showRemovableOnly
-                      ? "var(--on-accent)"
-                      : "var(--accent-danger)",
+                      ? "var(--accent-danger)"
+                      : "var(--text-secondary)",
                   border: `1px solid ${
                     listOpen && showRemovableOnly
-                      ? "var(--accent-danger)"
-                      : "var(--accent-danger-border)"
+                      ? "var(--accent-danger-border)"
+                      : "var(--border-base)"
                   }`,
                 }}
               >

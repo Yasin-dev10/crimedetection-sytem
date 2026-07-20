@@ -525,7 +525,7 @@ export default function FakeCrimes() {
                 className="mb-4 text-sm"
                 style={{ color: "var(--text-muted)" }}
               >
-                Flags set in Case Management. Pending flags need admin confirm
+                Flags set in Case Management. Sanctions apply automatically by policy.
                 before warning, suspension, or block.
               </p>
 

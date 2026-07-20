@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import API from "../api";
 import { getStoredUser } from "../theme";
+import { renderCrimeHighlightedText } from "../utils/crimeHighlight";
 
 const CURRENT_YEAR = new Date().getFullYear();
 const YEARS = Array.from({ length: 7 }, (_, index) => CURRENT_YEAR - index);
@@ -355,7 +356,16 @@ export default function WebsitePages() {
                     className="whitespace-pre-wrap text-sm leading-7"
                     style={{ color: "var(--text-secondary)" }}
                   >
-                    {page.content || "No content captured."}
+                    {page.isCrime
+                      ? renderCrimeHighlightedText(
+                          page.content || "No content captured.",
+                          true,
+                          {
+                            matchedKeyword: page.matchedKeyword,
+                            blacklistMatches: page.blacklistMatches,
+                          }
+                        )
+                      : page.content || "No content captured."}
                   </p>
 
                   <div className="mt-4 flex flex-wrap gap-2">

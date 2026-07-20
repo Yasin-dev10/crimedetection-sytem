@@ -15,7 +15,10 @@ const FETCH_TIMEOUT_MS = 12000;
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024; // 2MB
 const MAX_REDIRECTS = 3;
 const MAX_TEXT_LENGTH = 12000;
-const MAX_INTERNAL_LINKS = 5;
+/** How many candidate article links to discover from the homepage */
+const MAX_INTERNAL_LINKS = 20;
+/** Each by-id / watchlist scan ingests only this many NEW news pages */
+const NEWS_PER_SCAN = 1;
 const MIN_TEXT_LENGTH = 30;
 
 const BROWSER_USER_AGENT =
@@ -493,9 +496,24 @@ const analyzeWebsitePage = async ({ item, pageUrl, text }) => {
 =========================== */
 
 /**
- * Scans a single website blacklist item: fetches the registered root URL,
- * then up to MAX_INTERNAL_LINKS same-origin pages discovered on it.
- * Page failures are isolated; one bad page never aborts the scan.
+ * True when this URL was already stored for the website blacklist item.
+ */
+const hasScrapedWebsiteUrl = async (itemId, pageUrl) => {
+  const normalizedUrl = normalizePageUrl(pageUrl);
+  const existing = await History.findOne({
+    sourceType: "website",
+    "blacklistMatches.item": itemId,
+    $or: [{ url: pageUrl }, { url: normalizedUrl }],
+  })
+    .select("_id")
+    .lean();
+
+  return Boolean(existing);
+};
+
+/**
+ * Scans one website blacklist item by id: opens the homepage, finds article
+ * links, then scrapes exactly ONE new news page that has not been stored yet.
  */
 const scanWebsiteItem = async (item) => {
   const result = {
@@ -504,6 +522,7 @@ const scanWebsiteItem = async (item) => {
     scanned: 0,
     newRecords: 0,
     alerts: 0,
+    newsUrl: null,
     errors: [],
   };
 
@@ -532,46 +551,112 @@ const scanWebsiteItem = async (item) => {
 
   try {
     const rootUrl = rootCheck.url.toString();
-    const visited = new Set();
-    const pageQueue = [{ url: rootUrl, isRoot: true }];
+    let articleCandidates = [];
 
-    for (const page of pageQueue) {
-      const normalized = normalizePageUrl(page.url);
-      if (visited.has(normalized)) continue;
-      visited.add(normalized);
+    // 1) Fetch homepage only to discover news links
+    try {
+      const { finalUrl, html } = await fetchPageSafely(rootUrl);
+      const { $ } = extractPageContent(html);
+      articleCandidates = discoverInternalLinks($, finalUrl, MAX_INTERNAL_LINKS);
+    } catch (error) {
+      result.errors.push(`Homepage: ${error.message}`);
+      await BlacklistItem.findByIdAndUpdate(item._id, {
+        lastScannedAt: new Date(),
+        lastScanStatus: `error: ${String(error.message).slice(0, 180)}`,
+      }).catch(() => {});
+      return result;
+    }
 
-      try {
-        const { finalUrl, html } = await fetchPageSafely(page.url);
-        const { $, text } = extractPageContent(html);
-
-        result.scanned += 1;
-
-        if (page.isRoot) {
-          discoverInternalLinks($, finalUrl).forEach((link) =>
-            pageQueue.push({ url: link, isRoot: false })
-          );
-        }
-
-        const analysis = await analyzeWebsitePage({
-          item,
-          pageUrl: finalUrl,
-          text,
+    if (!articleCandidates.length) {
+      // No article links — fall back to analyzing the homepage once if never saved
+      const alreadyRoot = await hasScrapedWebsiteUrl(item._id, rootUrl);
+      if (!alreadyRoot) {
+        articleCandidates = [rootUrl];
+      } else {
+        const statusText = "no new news links found";
+        await BlacklistItem.findByIdAndUpdate(item._id, {
+          lastScannedAt: new Date(),
+          lastScanStatus: statusText,
         });
-
-        if (analysis?.created) result.newRecords += 1;
-        if (analysis?.alertCreated) result.alerts += 1;
-      } catch (error) {
-        result.errors.push(`${page.url}: ${error.message}`);
-
-        // Root failure means nothing was discovered — stop early.
-        if (page.isRoot) break;
+        return result;
       }
     }
 
+    // 2) Pick the first candidate not yet scraped, analyze only that one
+    let picked = null;
+
+    for (const candidateUrl of articleCandidates) {
+      const already = await hasScrapedWebsiteUrl(item._id, candidateUrl);
+      if (already) continue;
+      picked = candidateUrl;
+      break;
+    }
+
+    if (!picked) {
+      await BlacklistItem.findByIdAndUpdate(item._id, {
+        lastScannedAt: new Date(),
+        lastScanStatus: "all discovered news already scraped",
+      });
+      return result;
+    }
+
+    try {
+      const { finalUrl, html } = await fetchPageSafely(picked);
+      const { text } = extractPageContent(html);
+      result.scanned = 1;
+      result.newsUrl = finalUrl;
+
+      const analysis = await analyzeWebsitePage({
+        item,
+        pageUrl: finalUrl,
+        text,
+      });
+
+      if (analysis?.created) result.newRecords = 1;
+      if (analysis?.alertCreated) result.alerts = 1;
+
+      // If page had no usable text / was duplicate by content hash, try next candidates
+      if (!analysis?.created) {
+        for (const nextUrl of articleCandidates) {
+          if (normalizePageUrl(nextUrl) === normalizePageUrl(picked)) continue;
+          const already = await hasScrapedWebsiteUrl(item._id, nextUrl);
+          if (already) continue;
+
+          try {
+            const nextFetch = await fetchPageSafely(nextUrl);
+            const nextContent = extractPageContent(nextFetch.html);
+            result.scanned += 1;
+            result.newsUrl = nextFetch.finalUrl;
+
+            const nextAnalysis = await analyzeWebsitePage({
+              item,
+              pageUrl: nextFetch.finalUrl,
+              text: nextContent.text,
+            });
+
+            if (nextAnalysis?.created) {
+              result.newRecords = 1;
+              if (nextAnalysis.alertCreated) result.alerts = 1;
+              break;
+            }
+          } catch (nextError) {
+            result.errors.push(`${nextUrl}: ${nextError.message}`);
+          }
+
+          // Still only allow one successful NEW news per scan
+          if (result.newRecords >= NEWS_PER_SCAN) break;
+        }
+      }
+    } catch (error) {
+      result.errors.push(`${picked}: ${error.message}`);
+    }
+
     const statusText =
-      result.scanned === 0 && result.errors.length
+      result.newRecords > 0
+        ? `scraped 1 news, alerts ${result.alerts}`
+        : result.errors.length
         ? `error: ${result.errors[0].slice(0, 180)}`
-        : `scanned ${result.scanned} pages, new ${result.newRecords}, alerts ${result.alerts}`;
+        : "no new news scraped";
 
     await BlacklistItem.findByIdAndUpdate(item._id, {
       lastScannedAt: new Date(),

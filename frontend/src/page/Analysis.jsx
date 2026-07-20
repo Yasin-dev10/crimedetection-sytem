@@ -12,6 +12,7 @@ import {
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import API from "../api";
 import { getStoredUser } from "../theme";
+import { renderCrimeHighlightedText } from "../utils/crimeHighlight";
 
 export default function Analysis({ publicMode = false, embedded = false }) {
   const location = useLocation();
@@ -439,7 +440,11 @@ export default function Analysis({ publicMode = false, embedded = false }) {
                 }}
               >
                 {result.postText
-                  ? renderCrimeHighlightedText(result.postText, isCrimeResult(result))
+                  ? renderCrimeHighlightedText(
+                      result.postText,
+                      isCrimeResult(result),
+                      { matchedKeyword: result.matchedKeyword }
+                    )
                   : "No post text found"}
               </p>
 
@@ -524,7 +529,11 @@ export default function Analysis({ publicMode = false, embedded = false }) {
                               input: item.input,
                               extractedText: item.result?.postText || item.postText,
                             }),
-                            isCrime
+                            isCrime,
+                            {
+                              matchedKeyword:
+                                item.result?.matchedKeyword || item.matchedKeyword,
+                            }
                           )
                         : item.error}
                     </p>
@@ -570,85 +579,6 @@ function incrementGuestUsage(amount = 1) {
 
 function isCrimeResult(result) {
   return result?.isCrime === true || isCrimeLike(result?.rawPrediction || result?.prediction);
-}
-
-const CRIME_TERMS = [
-  "fal dambiyeed",
-  "fal danbiyeed",
-  "cabsi gelin",
-  "la kufsaday",
-  "la weeraray",
-  "la afduubay",
-  "la xaday",
-  "hanjabaad",
-  "hanjabaya",
-  "kufsaday",
-  "afduubay",
-  "weeraray",
-  "dambiile",
-  "danbiile",
-  "cabsigelin",
-  "bastoolad",
-  "dilkaaga",
-  "xatooyo",
-  "hanjabay",
-  "mindiyo",
-  "dilayaa",
-  "qarxin",
-  "qarxay",
-  "bambo",
-  "miino",
-  "boobay",
-  "kufsi",
-  "afduub",
-  "weerar",
-  "toorey",
-  "dileen",
-  "dilay",
-  "dilaa",
-  "dilka",
-  "dilid",
-  "tuugo",
-  "xaday",
-  "boob",
-  "qarax",
-  "tuug",
-  "qori",
-  "hub",
-  "bam",
-  "dil",
-];
-
-const CRIME_TERMS_PATTERN = new RegExp(
-  `(\\b(?:${CRIME_TERMS.map(escapeRegExp).join("|")})\\b)`,
-  "gi"
-);
-
-function escapeRegExp(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function renderCrimeHighlightedText(text, isCrime) {
-  const displayText = String(text || "");
-  if (!isCrime) return displayText;
-
-  return displayText.split(CRIME_TERMS_PATTERN).map((part, index) => {
-    const isCrimeTerm = CRIME_TERMS.some(
-      (term) => term.toLowerCase() === part.toLowerCase()
-    );
-
-    return isCrimeTerm ? (
-      <mark
-        key={`${part}-${index}`}
-        className="rounded bg-red-500/15 px-1 font-bold"
-        style={{ color: "var(--accent-danger)" }}
-      >
-        {part}
-      </mark>
-    ) : (
-      part
-    );
-  });
 }
 
 function isCrimeLike(prediction, explicitValue) {

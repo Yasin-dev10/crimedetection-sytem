@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import API from "../api";
 import { getStoredUser } from "../theme";
+import { renderCrimeHighlightedText } from "../utils/crimeHighlight";
 const READ_NOTIFICATION_STORAGE_KEY = "bareai.readNotificationRecords";
 
 export default function Notifications() {
@@ -675,7 +676,12 @@ function AssignedCaseDetails({
         </div>
 
         <p className="text-sm text-slate-300 whitespace-pre-wrap leading-7">
-          {history.content || "No content available"}
+          {history.content
+            ? renderCrimeHighlightedText(history.content, true, {
+                matchedKeyword: history.matchedKeyword,
+                blacklistMatches: history.blacklistMatches,
+              })
+            : "No content available"}
         </p>
       </div>
 
@@ -831,7 +837,16 @@ function AdminNotificationDetails({
         </div>
 
         <p className="text-sm text-slate-300 whitespace-pre-wrap leading-7">
-          {history.content || record.content || "No content available"}
+          {history.content || record.content
+            ? renderCrimeHighlightedText(
+                history.content || record.content,
+                true,
+                {
+                  matchedKeyword: history.matchedKeyword,
+                  blacklistMatches: history.blacklistMatches,
+                }
+              )
+            : "No content available"}
         </p>
       </div>
 

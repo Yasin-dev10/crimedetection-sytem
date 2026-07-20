@@ -3,6 +3,8 @@ import { useLocation, useNavigate } from "react-router-dom";
 import {
   AlertTriangle,
   Archive,
+  Check,
+  ChevronDown,
   ClipboardList,
   Download,
   Eye,
@@ -24,6 +26,7 @@ import {
 import API from "../api";
 import { getStoredUser } from "../theme";
 import { exportInvestigationCasePDF } from "../utils/investigationReport";
+import { renderCrimeHighlightedText } from "../utils/crimeHighlight";
 
 const ACTIVE_STATUSES = new Set(["pending", "investigating"]);
 
@@ -42,21 +45,93 @@ const ACCOUNT_ACTION_OPTIONS = [
   { value: "none", label: "Confirm flag only (no sanction)" },
 ];
 
+const VIEW_FILTER_GROUPS = [
+  {
+    label: "Overview",
+    options: [
+      { value: "active", label: "Active Cases" },
+      { value: "assigned", label: "Assigned (Open)" },
+      { value: "resolved", label: "Case Resolution" },
+      { value: "all", label: "All Cases" },
+    ],
+  },
+  {
+    label: "By status",
+    options: [
+      { value: "pending", label: "Pending" },
+      { value: "investigating", label: "Investigating" },
+      { value: "crime_case", label: "Crime Case / Verified" },
+      { value: "not_crime", label: "Not Crime" },
+      { value: "false_report", label: "Flagged: False Report" },
+      { value: "archived", label: "Archived" },
+    ],
+  },
+  {
+    label: "Reports",
+    options: [
+      { value: "my_reports", label: "My Reports" },
+      { value: "all_reports", label: "All Reports", adminOnly: true },
+    ],
+  },
+];
+
+const VIEW_FILTER_LABELS = Object.fromEntries(
+  VIEW_FILTER_GROUPS.flatMap((group) =>
+    group.options.map((opt) => [opt.value, opt.label])
+  )
+);
+
 const getSortedOfficers = (officers) =>
   [...officers].sort((a, b) =>
     String(a.name || "").localeCompare(String(b.name || ""))
   );
 
 const statusStyles = {
-  pending: "bg-amber-500/10 text-amber-300 border-amber-500/30",
-  investigating: "bg-cyan-500/10 text-cyan-300 border-cyan-500/30",
-  crime_case: "bg-red-500/10 text-red-300 border-red-500/30",
-  not_crime: "bg-emerald-500/10 text-emerald-300 border-emerald-500/30",
-  false_report: "bg-orange-500/10 text-orange-300 border-orange-500/30",
-  misleading_information: "bg-yellow-500/10 text-yellow-300 border-yellow-500/30",
-  malicious_report: "bg-rose-500/10 text-rose-300 border-rose-500/30",
-  resolved: "bg-emerald-500/10 text-emerald-300 border-emerald-500/30",
-  archived: "bg-slate-500/10 text-slate-300 border-slate-500/30",
+  pending: {
+    bg: "rgba(245, 158, 11, 0.12)",
+    color: "#d97706",
+    border: "rgba(245, 158, 11, 0.35)",
+  },
+  investigating: {
+    bg: "rgba(30, 58, 138, 0.12)",
+    color: "#1E3A8A",
+    border: "rgba(30, 58, 138, 0.3)",
+  },
+  crime_case: {
+    bg: "rgba(239, 68, 68, 0.12)",
+    color: "#dc2626",
+    border: "rgba(239, 68, 68, 0.3)",
+  },
+  not_crime: {
+    bg: "rgba(16, 185, 129, 0.12)",
+    color: "#059669",
+    border: "rgba(16, 185, 129, 0.3)",
+  },
+  false_report: {
+    bg: "rgba(249, 115, 22, 0.12)",
+    color: "#ea580c",
+    border: "rgba(249, 115, 22, 0.3)",
+  },
+  misleading_information: {
+    bg: "rgba(202, 138, 4, 0.12)",
+    color: "#a16207",
+    border: "rgba(202, 138, 4, 0.3)",
+  },
+  malicious_report: {
+    bg: "rgba(225, 29, 72, 0.12)",
+    color: "#e11d48",
+    border: "rgba(225, 29, 72, 0.3)",
+  },
+  resolved: {
+    bg: "rgba(16, 185, 129, 0.12)",
+    color: "#059669",
+    border: "rgba(16, 185, 129, 0.3)",
+  },
+  archived: {
+    bg: "rgba(100, 116, 139, 0.12)",
+    color: "#64748b",
+    border: "rgba(100, 116, 139, 0.3)",
+  },
 };
 
 export default function CaseManagement() {
@@ -321,7 +396,7 @@ export default function CaseManagement() {
       setSelectedCase((prev) => (prev?._id === id ? updated : prev));
       setSuccess(
         res.data.message ||
-          "Report flagged. Admin must confirm before any account sanction."
+          "False report flag applied automatically."
       );
       return true;
     } catch (err) {
@@ -416,10 +491,6 @@ export default function CaseManagement() {
     {
       false_report:
         "Weli ma jiraan cases False Report loo calaamadeeyay. Tag Active Cases → fur case → Status Updates & Resolution → Mark as False Report.",
-      misleading_information:
-        "Weli ma jiraan cases Misleading Information loo calaamadeeyay. Fur active case oo flag-garee qaybta Status Updates & Resolution.",
-      malicious_report:
-        "Weli ma jiraan cases Malicious Report loo calaamadeeyay. Fur active case oo flag-garee qaybta Status Updates & Resolution.",
       assigned: isInvestigator
         ? "No open assigned cases right now."
         : "No open assigned cases in this view.",
@@ -457,7 +528,7 @@ export default function CaseManagement() {
         <div className="mb-8 flex flex-col justify-between gap-4 lg:flex-row lg:items-center">
           <div>
             <h1 className="mt-1 text-3xl font-bold">Case Management</h1>
-            <p className="mt-2 max-w-2xl text-sm text-slate-400">
+            <p className="mt-2 max-w-2xl text-sm" style={{ color: "var(--text-muted)" }}>
               {isInvestigator
                 ? "When AI detects a crime, available cases appear here for every investigator. Open a case first to claim it — others are removed automatically."
                 : "Assigned cases, active investigations, notes, status updates, and case resolution in one workspace. AI crime cases are broadcast to all investigators."}
@@ -466,56 +537,71 @@ export default function CaseManagement() {
             {success && <p className="mt-2 text-sm text-emerald-400">{success}</p>}
           </div>
 
-          <select
+          <ViewFilterDropdown
             value={viewFilter}
-            onChange={(e) => setViewFilter(e.target.value)}
-            className="rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-sm"
-          >
-            <option value="active">Active Cases</option>
-            <option value="assigned">Assigned (Open)</option>
-            <option value="resolved">Case Resolution</option>
-            <option value="all">All Cases</option>
-            <option value="pending">Pending</option>
-            <option value="investigating">Investigating</option>
-            <option value="crime_case">Crime Case / Verified</option>
-            <option value="not_crime">Not Crime</option>
-            <option value="false_report">Flagged: False Report</option>
-            <option value="misleading_information">Flagged: Misleading</option>
-            <option value="malicious_report">Flagged: Malicious</option>
-            <option value="archived">Archived</option>
-            <option value="my_reports">
-              {isInvestigator ? "My Reports" : "My Reports"}
-            </option>
-            {isAdmin && <option value="all_reports">All Reports</option>}
-          </select>
+            onChange={setViewFilter}
+            isAdmin={isAdmin}
+          />
         </div>
 
         <div className="mb-8 grid grid-cols-1 gap-4 md:grid-cols-4">
-          <Metric title="Assigned (Open)" value={totals.assigned} icon={UserCheck} />
-          <Metric title="Active Cases" value={totals.active} icon={Activity} />
+          <Metric
+            title="Assigned (Open)"
+            value={totals.assigned}
+            icon={UserCheck}
+            active={viewFilter === "assigned"}
+            onClick={() => setViewFilter("assigned")}
+          />
+          <Metric
+            title="Active Cases"
+            value={totals.active}
+            icon={Activity}
+            active={viewFilter === "active"}
+            onClick={() => setViewFilter("active")}
+          />
           <Metric
             title={isAdmin ? "All Reports" : "My Reports"}
             value={isAdmin ? totals.allReports : totals.myReports}
             icon={FileText}
+            active={viewFilter === (isAdmin ? "all_reports" : "my_reports")}
+            onClick={() => setViewFilter(isAdmin ? "all_reports" : "my_reports")}
           />
-          <Metric title="Resolved" value={totals.resolved} icon={ShieldCheck} />
+          <Metric
+            title="Resolved"
+            value={totals.resolved}
+            icon={ShieldCheck}
+            active={viewFilter === "resolved"}
+            onClick={() => setViewFilter("resolved")}
+          />
         </div>
 
         {loading ? (
-          <p className="text-slate-400">Loading case management...</p>
+          <p className="text-sm" style={{ color: "var(--text-muted)" }}>
+            Loading case management...
+          </p>
         ) : isReportsView ? (
-          <section className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
-            <h2 className="mb-4 flex items-center gap-2 text-lg font-bold">
-              <ClipboardList className="text-cyan-300" size={20} />
+          <section
+            className="rounded-2xl border p-5"
+            style={{
+              backgroundColor: "var(--bg-card)",
+              borderColor: "var(--border-base)",
+              boxShadow: "var(--shadow-card)",
+            }}
+          >
+            <h2
+              className="mb-4 flex items-center gap-2 text-lg font-bold"
+              style={{ color: "var(--text-primary)" }}
+            >
+              <ClipboardList size={20} style={{ color: "var(--brand)" }} />
               {sectionTitle}
             </h2>
-            <p className="mb-4 text-sm text-slate-400">
+            <p className="mb-4 text-sm" style={{ color: "var(--text-muted)" }}>
               {isAdmin && viewFilter === "all_reports"
                 ? "Admin view — all investigation reports across investigators."
                 : "You only see investigation reports you authored."}
             </p>
             {visibleReports.length === 0 ? (
-              <p className="text-sm text-slate-400">
+              <p className="text-sm" style={{ color: "var(--text-muted)" }}>
                 No investigation reports yet. Open an assigned case and create a report.
               </p>
             ) : (
@@ -549,20 +635,37 @@ export default function CaseManagement() {
             )}
           </section>
         ) : (
-          <section className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
-            <h2 className="mb-4 flex items-center gap-2 text-lg font-bold">
-              <ClipboardList className="text-cyan-300" size={20} />
+          <section
+            className="rounded-2xl border p-5"
+            style={{
+              backgroundColor: "var(--bg-card)",
+              borderColor: "var(--border-base)",
+              boxShadow: "var(--shadow-card)",
+            }}
+          >
+            <h2
+              className="mb-4 flex items-center gap-2 text-lg font-bold"
+              style={{ color: "var(--text-primary)" }}
+            >
+              <ClipboardList size={20} style={{ color: "var(--brand)" }} />
               {sectionTitle}
             </h2>
 
             {visibleCases.length === 0 ? (
               <div className="space-y-3">
-                <p className="text-sm text-slate-400">{emptyViewHint}</p>
+                <p className="text-sm" style={{ color: "var(--text-muted)" }}>
+                  {emptyViewHint}
+                </p>
                 {FLAG_STATUSES.has(viewFilter) && (
                   <button
                     type="button"
                     onClick={() => setViewFilter("active")}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-xs font-bold text-cyan-300 hover:bg-cyan-500/20"
+                    className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-bold transition hover:opacity-90"
+                    style={{
+                      backgroundColor: "var(--brand-soft)",
+                      borderColor: "var(--brand-ring)",
+                      color: "var(--brand)",
+                    }}
                   >
                     Go to Active Cases
                   </button>
@@ -613,19 +716,155 @@ export default function CaseManagement() {
   );
 }
 
-function Metric({ title, value, icon: Icon }) {
+function ViewFilterDropdown({ value, onChange, isAdmin }) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return undefined;
+
+    const onPointerDown = (event) => {
+      if (!rootRef.current?.contains(event.target)) setOpen(false);
+    };
+    const onKeyDown = (event) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
+  const label = VIEW_FILTER_LABELS[value] || "Filter cases";
+
   return (
-    <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+    <div ref={rootRef} className="relative z-30 w-full sm:w-72">
+      <button
+        type="button"
+        onClick={() => setOpen((prev) => !prev)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        className="flex w-full items-center justify-between gap-3 rounded-xl border px-4 py-2.5 text-left text-sm font-semibold transition hover:opacity-95"
+        style={{
+          backgroundColor: "var(--bg-card)",
+          borderColor: open ? "var(--brand-ring)" : "var(--border-base)",
+          color: "var(--text-primary)",
+          boxShadow: "var(--shadow-card)",
+        }}
+      >
+        <span className="truncate">{label}</span>
+        <ChevronDown
+          size={16}
+          className={`shrink-0 transition-transform ${open ? "rotate-180" : ""}`}
+          style={{ color: "var(--text-muted)" }}
+        />
+      </button>
+
+      {open && (
+        <div
+          role="listbox"
+          aria-label="Case view filter"
+          className="absolute right-0 z-50 mt-2 max-h-80 w-full overflow-y-auto rounded-xl border py-2 shadow-xl"
+          style={{
+            backgroundColor: "var(--bg-card)",
+            borderColor: "var(--border-base)",
+            boxShadow: "var(--shadow-card)",
+          }}
+        >
+          {VIEW_FILTER_GROUPS.map((group) => {
+            const options = group.options.filter(
+              (opt) => !opt.adminOnly || isAdmin
+            );
+            if (options.length === 0) return null;
+
+            return (
+              <div key={group.label} className="py-1">
+                <p
+                  className="px-3 pb-1 pt-1.5 text-[10px] font-bold uppercase tracking-wider"
+                  style={{ color: "var(--text-muted)" }}
+                >
+                  {group.label}
+                </p>
+                {options.map((opt) => {
+                  const selected = value === opt.value;
+                  return (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      role="option"
+                      aria-selected={selected}
+                      onClick={() => {
+                        onChange(opt.value);
+                        setOpen(false);
+                      }}
+                      className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm transition hover:opacity-90"
+                      style={{
+                        backgroundColor: selected
+                          ? "var(--brand-soft)"
+                          : "transparent",
+                        color: selected
+                          ? "var(--brand)"
+                          : "var(--text-primary)",
+                      }}
+                    >
+                      <span className="font-medium">{opt.label}</span>
+                      {selected && <Check size={15} className="shrink-0" />}
+                    </button>
+                  );
+                })}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Metric({ title, value, icon: Icon, active = false, onClick }) {
+  const interactive = typeof onClick === "function";
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={!interactive}
+      className={`w-full rounded-2xl border p-5 text-left transition ${
+        interactive ? "cursor-pointer hover:opacity-95" : "cursor-default"
+      }`}
+      style={{
+        backgroundColor: "var(--bg-card)",
+        borderColor: active ? "var(--brand-ring)" : "var(--border-base)",
+        boxShadow: "var(--shadow-card)",
+        outline: active ? "2px solid var(--brand-soft)" : "none",
+      }}
+    >
       <div className="flex items-center justify-between">
         <div>
-          <p className="text-sm text-slate-400">{title}</p>
-          <h2 className="mt-2 text-3xl font-bold">{value}</h2>
+          <p className="text-sm" style={{ color: "var(--text-muted)" }}>
+            {title}
+          </p>
+          <h2
+            className="mt-2 text-3xl font-bold"
+            style={{ color: "var(--text-primary)" }}
+          >
+            {value}
+          </h2>
         </div>
-        <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-cyan-500/10 text-cyan-300">
+        <div
+          className="flex h-11 w-11 items-center justify-center rounded-xl"
+          style={{
+            backgroundColor: "var(--brand-soft)",
+            color: "var(--brand)",
+          }}
+        >
           <Icon size={22} />
         </div>
       </div>
-    </div>
+    </button>
   );
 }
 
@@ -747,83 +986,119 @@ function CaseRow({
     item.status !== "not_crime" &&
     !FLAG_STATUSES.has(item.status) &&
     item.status !== "archived";
+  const badge = statusStyles[item.status] || statusStyles.pending;
 
   return (
-    <div className="rounded-xl border border-slate-800 bg-slate-950 p-4">
-      <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-start">
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <span
-              className={`rounded-full border px-2.5 py-1 text-xs font-bold ${
-                statusStyles[item.status]
-              }`}
-            >
-              {formatStatus(item.status)}
-            </span>
-            <span className="text-xs text-slate-500">
-              {formatDate(history.createdAt || item.createdAt)}
-            </span>
-          </div>
+    <div
+      className="overflow-hidden rounded-2xl border"
+      style={{
+        backgroundColor: "var(--bg-card)",
+        borderColor: "var(--border-base)",
+        boxShadow: "var(--shadow-card)",
+      }}
+    >
+      {/* Header: status + date only */}
+      <div
+        className="flex flex-wrap items-center justify-between gap-2 border-b px-4 py-3"
+        style={{ borderColor: "var(--border-soft)" }}
+      >
+        <span
+          className="inline-flex rounded-lg border px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide"
+          style={{
+            backgroundColor: badge.bg,
+            color: badge.color,
+            borderColor: badge.border,
+          }}
+        >
+          {formatStatus(item.status)}
+        </span>
+        <span className="text-xs font-medium" style={{ color: "var(--text-muted)" }}>
+          {formatDate(history.createdAt || item.createdAt)}
+        </span>
+      </div>
 
-          <h3 className="mt-3 font-bold">
-            {(history.sourceType || history.type || "record").toUpperCase()}{" "}
-            Investigation Case
-          </h3>
+      {/* Body */}
+      <div className="px-4 py-3.5">
+        <h3
+          className="text-base font-bold tracking-tight"
+          style={{ color: "var(--text-primary)" }}
+        >
+          {(history.sourceType || history.type || "record").toUpperCase()}{" "}
+          Investigation Case
+        </h3>
 
-          <p className="mt-2 line-clamp-2 text-sm text-slate-400">
-            {history.content}
-          </p>
+        <p
+          className="mt-2 line-clamp-2 text-sm leading-relaxed"
+          style={{ color: "var(--text-secondary)" }}
+        >
+          {history.isCrime || item.status === "crime_case"
+            ? renderCrimeHighlightedText(history.content || "", true, {
+                matchedKeyword: history.matchedKeyword,
+                blacklistMatches: history.blacklistMatches,
+              })
+            : history.content || "No content"}
+        </p>
 
-          <div className="mt-2 text-xs text-slate-500">
-            Officer:{" "}
-            {item.assignedOfficer?.name ||
-              (item.status === "pending"
-                ? "Available — open to claim"
-                : "Not assigned")}
-            {" · "}
-            Notes: {item.notes?.length || 0}
-          </div>
-        </div>
+        <p className="mt-2.5 text-xs" style={{ color: "var(--text-muted)" }}>
+          Officer:{" "}
+          {item.assignedOfficer?.name ||
+            (item.status === "pending"
+              ? "Available — open to claim"
+              : "Not assigned")}
+          {" · "}
+          Notes: {item.notes?.length || 0}
+        </p>
+      </div>
 
-        <div className="flex flex-wrap items-center gap-2 sm:shrink-0">
-          {isAdmin && (
-            <button
-              type="button"
-              onClick={onAssign}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-2.5 py-1.5 text-[11px] font-bold text-cyan-300 transition hover:bg-cyan-500/20"
-            >
-              <UserPlus size={12} />
-              Assign
-            </button>
-          )}
-          {canWorkCase && item.status === "pending" && (
-            <Button
-              icon={Activity}
-              label="Start Investigating"
-              onClick={() => onStatus("investigating")}
+      {/* Actions: separate row, consistent style */}
+      <div
+        className="flex flex-wrap gap-2 border-t px-4 py-3"
+        style={{
+          borderColor: "var(--border-soft)",
+          backgroundColor: "var(--bg-surface)",
+        }}
+      >
+        {isAdmin && (
+          <CaseActionButton
+            icon={UserPlus}
+            label="Assign"
+            onClick={onAssign}
+            tone="primary"
+          />
+        )}
+        {canWorkCase && item.status === "pending" && (
+          <CaseActionButton
+            icon={Activity}
+            label="Start"
+            onClick={() => onStatus("investigating")}
+            tone="primary"
+          />
+        )}
+        {canWorkCase && (
+          <>
+            <CaseActionButton
+              icon={ShieldAlert}
+              label="Crime"
+              onClick={() => onClassify(true)}
+              tone="danger"
             />
-          )}
-          {canWorkCase && (
-            <>
-              <Button
-                icon={ShieldAlert}
-                label="Resolve as Crime"
-                onClick={() => onClassify(true)}
-                danger
-              />
-              <Button
-                icon={ShieldCheck}
-                label="Resolve as Not Crime"
-                onClick={() => onClassify(false)}
-                safe
-              />
-            </>
-          )}
-          <Button icon={Eye} label="View" onClick={onView} />
-          {isAdmin && (
-            <Button icon={Trash2} label="Delete" danger onClick={onDelete} />
-          )}
-        </div>
+            <CaseActionButton
+              icon={ShieldCheck}
+              label="Not Crime"
+              onClick={() => onClassify(false)}
+              tone="success"
+            />
+          </>
+        )}
+        <CaseActionButton icon={Eye} label="View" onClick={onView} tone="neutral" />
+        {isAdmin && (
+          <CaseActionButton
+            icon={Trash2}
+            label="Delete"
+            onClick={onDelete}
+            tone="danger"
+          />
+        )}
       </div>
     </div>
   );
@@ -908,8 +1183,8 @@ function CaseDetails({
       return;
     }
     const userNote = hasCitizenReporter
-      ? "This will increase the reporter's flag count. You will NOT block the account — an admin must confirm any sanction."
-      : "No citizen account is linked (e.g. Facebook/website scan). The case will be marked, but no user flag count will change.";
+      ? "Flag count and account sanction (warning / under review / suspension / block) will be applied automatically by policy."
+      : "No citizen account is linked (e.g. Facebook/website scan). The case will be marked, but no user will be sanctioned.";
     if (
       !window.confirm(`Mark this report as False Report?\n\n${userNote}`)
     ) {
@@ -1205,9 +1480,12 @@ function CaseDetails({
                           <span className="text-sm font-bold text-orange-300">
                             {formatStatus(item.status)}
                             {item.reportFlag?.reviewStatus === "pending"
-                              ? " — Pending admin review"
+                              ? " — Pending admin review (legacy)"
                               : item.reportFlag?.reviewStatus === "confirmed"
-                              ? " — Confirmed"
+                              ? item.reportFlag?.adminAction &&
+                                item.reportFlag.adminAction !== "none"
+                                ? ` — Applied (${item.reportFlag.adminAction})`
+                                : " — Applied"
                               : item.reportFlag?.reviewStatus === "rejected"
                               ? " — Rejected"
                               : ""}
@@ -1231,12 +1509,17 @@ function CaseDetails({
                     {isAdmin && pendingFlag && (
                       <div className="space-y-3 border-t border-slate-700/60 pt-3">
                         <p className="text-xs font-semibold text-amber-300">
-                          Admin review required
+                          Legacy flag — admin review still required
                         </p>
                         <select
                           value={adminAction}
                           onChange={(e) => setAdminAction(e.target.value)}
-                          className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200"
+                          className="w-full rounded-lg border px-3 py-2 text-sm"
+                          style={{
+                            backgroundColor: "var(--bg-elevated)",
+                            borderColor: "var(--border-base)",
+                            color: "var(--text-primary)",
+                          }}
                         >
                           {ACCOUNT_ACTION_OPTIONS.map((opt) => (
                             <option key={opt.value || "suggest"} value={opt.value}>
@@ -1305,7 +1588,7 @@ function CaseDetails({
                         <p className="text-[11px] text-slate-400">
                           Use this when the submission is a false report.
                           {hasCitizenReporter
-                            ? " Flag count goes to the reporter; admin confirms sanctions."
+                            ? " Flag count and account sanction apply automatically (1=warning, 2=under review, 3=suspended, 5=blocked)."
                             : " No linked citizen account — case will be marked only."}
                         </p>
 
@@ -1381,11 +1664,16 @@ function CaseDetails({
                 <FileText size={12} />
                 Incident Narrative
               </p>
-              <textarea
-                readOnly
-                value={history.content || "No content available."}
-                className="h-40 w-full resize-none rounded-xl border border-slate-700/60 bg-[#0d1117] p-4 font-mono text-sm leading-relaxed text-slate-300 outline-none"
-              />
+              <div className="h-40 w-full overflow-y-auto whitespace-pre-wrap rounded-xl border border-slate-700/60 bg-[#0d1117] p-4 font-mono text-sm leading-relaxed text-slate-300">
+                {history.content
+                  ? isCrime || FLAG_STATUSES.has(item.status) || item.status === "crime_case"
+                    ? renderCrimeHighlightedText(history.content, true, {
+                        matchedKeyword: history.matchedKeyword,
+                        blacklistMatches: history.blacklistMatches,
+                      })
+                    : history.content
+                  : "No content available."}
+              </div>
             </div>
 
             <div className="rounded-xl border border-slate-800 bg-[#111827] p-5">
@@ -1456,10 +1744,22 @@ function InvestigationReportRow({
     : "—";
 
   return (
-    <div className="flex flex-col gap-3 rounded-xl border border-slate-800 bg-slate-950/50 p-4 sm:flex-row sm:items-center sm:justify-between">
-      <div className="min-w-0">
-        <p className="truncate text-sm font-bold text-white">{report.title}</p>
-        <p className="mt-1 text-xs text-slate-400">
+    <div
+      className="flex flex-col gap-3 overflow-hidden rounded-2xl border sm:flex-row sm:items-center sm:justify-between"
+      style={{
+        backgroundColor: "var(--bg-card)",
+        borderColor: "var(--border-base)",
+        boxShadow: "var(--shadow-card)",
+      }}
+    >
+      <div className="min-w-0 px-4 py-3.5">
+        <p
+          className="truncate text-sm font-bold"
+          style={{ color: "var(--text-primary)" }}
+        >
+          {report.title}
+        </p>
+        <p className="mt-1 text-xs" style={{ color: "var(--text-muted)" }}>
           Case #{caseLabel}
           {" · "}
           {report.investigator?.name || "Investigator"}
@@ -1469,56 +1769,91 @@ function InvestigationReportRow({
           Updated {formatDate(report.updatedAt)}
         </p>
       </div>
-      <div className="flex flex-wrap gap-2">
-        <button
-          type="button"
+      <div
+        className="flex flex-wrap gap-2 border-t px-4 py-3 sm:border-t-0 sm:border-l"
+        style={{
+          borderColor: "var(--border-soft)",
+          backgroundColor: "var(--bg-surface)",
+        }}
+      >
+        <CaseActionButton
+          icon={Eye}
+          label="Open case"
           onClick={onOpen}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-xs font-bold text-cyan-300 hover:bg-cyan-500/20"
-        >
-          <Eye size={14} />
-          Open case
-        </button>
+          tone="primary"
+        />
         {(isAdmin || isOwn) && (
-          <button
-            type="button"
+          <CaseActionButton
+            icon={Download}
+            label="PDF"
             onClick={onExport}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-600 bg-slate-800 px-3 py-2 text-xs font-bold text-slate-200 hover:bg-slate-700"
-          >
-            <Download size={14} />
-            PDF
-          </button>
+            tone="neutral"
+          />
         )}
         {isAdmin && (
-          <button
-            type="button"
+          <CaseActionButton
+            icon={Trash2}
+            label="Delete"
             onClick={onDelete}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-bold text-red-300 hover:bg-red-500/20"
-          >
-            <Trash2 size={14} />
-            Delete
-          </button>
+            tone="danger"
+          />
         )}
       </div>
     </div>
   );
 }
 
-function Button({ icon: Icon, label, onClick, danger = false, safe = false }) {
+function CaseActionButton({ icon: Icon, label, onClick, tone = "neutral" }) {
+  const tones = {
+    primary: {
+      background: "rgba(30, 58, 138, 0.1)",
+      color: "#1E3A8A",
+      border: "rgba(30, 58, 138, 0.28)",
+    },
+    success: {
+      background: "rgba(16, 185, 129, 0.1)",
+      color: "#059669",
+      border: "rgba(16, 185, 129, 0.28)",
+    },
+    danger: {
+      background: "rgba(239, 68, 68, 0.1)",
+      color: "#dc2626",
+      border: "rgba(239, 68, 68, 0.28)",
+    },
+    neutral: {
+      background: "var(--bg-elevated)",
+      color: "var(--text-secondary)",
+      border: "var(--border-base)",
+    },
+  };
+  const style = tones[tone] || tones.neutral;
+
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-bold ${
-        danger
-          ? "border border-red-500/30 bg-red-500/10 text-red-300 hover:bg-red-500/20"
-          : safe
-          ? "border border-emerald-500/30 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20"
-          : "bg-slate-800 text-slate-300 hover:bg-slate-700"
-      }`}
+      className="inline-flex h-8 items-center gap-1.5 rounded-lg border px-3 text-xs font-bold transition hover:opacity-85"
+      style={{
+        backgroundColor: style.background,
+        color: style.color,
+        borderColor: style.border,
+      }}
     >
-      <Icon size={14} />
+      <Icon size={13} strokeWidth={2.25} />
       {label}
     </button>
+  );
+}
+
+function Button({ icon: Icon, label, onClick, danger = false, safe = false }) {
+  const tone = danger ? "danger" : safe ? "success" : "neutral";
+  return (
+    <CaseActionButton
+      icon={Icon}
+      label={label}
+      onClick={onClick}
+      tone={tone}
+    />
   );
 }
 

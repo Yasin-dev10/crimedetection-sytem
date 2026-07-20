@@ -851,8 +851,9 @@ const deleteCase = async (req, res) => {
 };
 
 /**
- * Investigator marks a case as False Report / Misleading / Malicious.
- * Increments the reporting user's flag count but does NOT sanction the account.
+ * Investigator/admin marks a case as False Report (etc.).
+ * Flag is applied immediately — increments count and applies policy sanctions
+ * (no admin confirmation step).
  */
 const flagCase = async (req, res) => {
   try {
@@ -907,7 +908,7 @@ const flagCase = async (req, res) => {
       isFlagStatus(existingCase.status)
     ) {
       return res.status(400).json({
-        message: "This case was already flagged and confirmed by an admin",
+        message: "This case was already flagged",
       });
     }
 
@@ -916,6 +917,8 @@ const flagCase = async (req, res) => {
       historyDoc?.user?._id || historyDoc?.user || null;
 
     let reportingUser = null;
+    let appliedStatus = null;
+
     if (reportingUserId) {
       reportingUser = await User.findById(reportingUserId);
       if (!reportingUser) {
@@ -943,28 +946,35 @@ const flagCase = async (req, res) => {
       reportingUser.flag_reason = reasonText;
       reportingUser.flagged_by = req.user._id;
       reportingUser.flagged_at = new Date();
-      // Investigators never change account_status — admin confirms later
+
+      appliedStatus = suggestAccountStatus(reportingUser.false_report_count);
+      reportingUser.account_status = appliedStatus;
+      if (appliedStatus === "blocked" || appliedStatus === "suspended") {
+        reportingUser.status = "inactive";
+      }
+
       await reportingUser.save();
     }
 
     const wasResolved = isResolvedStatus(existingCase.status);
+    const now = new Date();
 
     existingCase.status = normalizedType;
     existingCase.reportFlag = {
       type: normalizedType,
       reason: reasonText,
       flaggedBy: req.user._id,
-      flaggedAt: new Date(),
-      reviewStatus: "pending",
-      reviewedBy: null,
-      reviewedAt: null,
-      adminAction: null,
-      adminNotes: "",
+      flaggedAt: now,
+      reviewStatus: "confirmed",
+      reviewedBy: req.user._id,
+      reviewedAt: now,
+      adminAction: appliedStatus || "none",
+      adminNotes: "Auto-applied on investigator flag (policy)",
       reportingUser: reportingUser?._id || null,
     };
 
     if (!wasResolved) {
-      existingCase.resolvedAt = new Date();
+      existingCase.resolvedAt = now;
       existingCase.resolvedBy = req.user._id;
     }
 
@@ -992,14 +1002,32 @@ const flagCase = async (req, res) => {
         reportingUserId: reportingUser?._id || null,
         reportingUserEmail: reportingUser?.email || null,
         false_report_count: reportingUser?.false_report_count ?? null,
+        account_status: appliedStatus,
+        autoConfirmed: true,
         caseOnly: !reportingUser,
       },
     });
 
+    if (reportingUser && appliedStatus) {
+      await logActivity({
+        req,
+        action: "account_sanctioned",
+        resourceType: "User",
+        resourceId: reportingUser._id,
+        details: {
+          account_status: appliedStatus,
+          false_report_count: reportingUser.false_report_count,
+          caseId: existingCase._id,
+          flagType: normalizedType,
+          autoApplied: true,
+        },
+      });
+    }
+
     return res.json({
       message: reportingUser
-        ? `${FLAG_TYPE_LABELS[normalizedType]} recorded. Pending admin review — no account sanction applied yet.`
-        : `${FLAG_TYPE_LABELS[normalizedType]} recorded on this case. No linked citizen account to flag.`,
+        ? `${FLAG_TYPE_LABELS[normalizedType]} applied. Account status set to ${appliedStatus} (flags: ${reportingUser.false_report_count}).`
+        : `${FLAG_TYPE_LABELS[normalizedType]} recorded on this case. No linked citizen account to sanction.`,
       case: populated,
       reportingUser: reportingUser
         ? {
@@ -1011,9 +1039,8 @@ const flagCase = async (req, res) => {
             account_status: reportingUser.account_status,
           }
         : null,
-      suggestedAction: reportingUser
-        ? suggestAccountStatus(reportingUser.false_report_count)
-        : null,
+      appliedAction: appliedStatus,
+      suggestedAction: appliedStatus,
     });
   } catch (error) {
     return res.status(500).json({

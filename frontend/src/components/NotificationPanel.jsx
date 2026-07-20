@@ -11,6 +11,7 @@ import {
   X,
 } from "lucide-react";
 import API from "../api";
+import { renderCrimeHighlightedText } from "../utils/crimeHighlight";
 
 const SOURCE_TABS = [
   { id: "facebook", label: "Facebook", icon: MessageCircle },
@@ -388,7 +389,15 @@ export default function NotificationPanel({ open, onClose, onUnreadChange }) {
                       Content
                     </p>
                     <p className="line-clamp-6 whitespace-pre-wrap">
-                      {selected.case.history.content}
+                      {renderCrimeHighlightedText(
+                        selected.case.history.content,
+                        selected.case.history.isCrime !== false,
+                        {
+                          matchedKeyword: selected.case.history.matchedKeyword,
+                          blacklistMatches:
+                            selected.case.history.blacklistMatches,
+                        }
+                      )}
                     </p>
                   </div>
                 )}
