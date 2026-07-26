@@ -7,6 +7,10 @@ import {
   ShieldCheck,
   Globe,
   FolderSearch,
+  Link as LinkIcon,
+  FileText,
+  Upload,
+  Layers,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -106,6 +110,20 @@ export default function Dashboard() {
   const analysisTypes = dashboard.analysisTypes || [];
   const caseStatus = dashboard.caseStatus || [];
   const blacklistCrimeChart = dashboard.blacklistCrimeChart || [];
+
+  const analysisTypeRows = analysisTypes.map((item) => ({
+    ...item,
+    label: formatLabel(item.type || "unknown"),
+    count: Number(item.count) || 0,
+  }));
+  const analysisTypeTotal = analysisTypeRows.reduce(
+    (sum, item) => sum + item.count,
+    0
+  );
+  const analysisTypeMax = Math.max(
+    ...analysisTypeRows.map((item) => item.count),
+    1
+  );
 
   const pieColors = ["#ef4444", "#3b82f6", "#64748b", "#94a3b8"];
 
@@ -319,46 +337,103 @@ export default function Dashboard() {
           {analysisTypes.length === 0 ? (
             <EmptyChart text="No analysis types yet." />
           ) : (
-            <ResponsiveContainer height={240}>
-              <BarChart
-                data={analysisTypes}
-                margin={{ top: 8, right: 8, left: -20, bottom: 0 }}
-              >
-                <defs>
-                  <linearGradient id="barAnalysis" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#3b82f6" />
-                    <stop offset="100%" stopColor="#06b6d4" />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid
-                  stroke={gridColor}
-                  strokeDasharray="3 3"
-                  vertical={false}
-                />
-                <XAxis
-                  dataKey="type"
-                  stroke={axisColor}
-                  fontSize={11}
-                  tickLine={false}
-                  axisLine={false}
-                />
-                <YAxis
-                  stroke={axisColor}
-                  fontSize={11}
-                  tickLine={false}
-                  axisLine={false}
-                />
-                <Tooltip
-                  contentStyle={tooltipStyle}
-                  cursor={{ fill: cursorColor, opacity: 0.35 }}
-                />
-                <Bar
-                  dataKey="count"
-                  fill="url(#barAnalysis)"
-                  radius={[6, 6, 0, 0]}
-                />
-              </BarChart>
-            </ResponsiveContainer>
+            <div className="flex h-[240px] flex-col">
+              <div className="mb-4 flex items-end justify-between gap-3">
+                <div>
+                  <p
+                    className="text-[11px] font-bold uppercase tracking-[0.14em]"
+                    style={{ color: "var(--text-muted)" }}
+                  >
+                    Input channels
+                  </p>
+                  <p
+                    className="mt-1 text-sm"
+                    style={{ color: "var(--text-secondary)" }}
+                  >
+                    Share of analyses by source type
+                  </p>
+                </div>
+                <div className="text-right">
+                  <p
+                    className="text-2xl font-extrabold tabular-nums tracking-tight"
+                    style={{ color: "var(--text-primary)" }}
+                  >
+                    {analysisTypeTotal}
+                  </p>
+                  <p
+                    className="text-[11px] font-semibold uppercase tracking-wide"
+                    style={{ color: "var(--text-muted)" }}
+                  >
+                    Total
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex flex-1 flex-col justify-center gap-3.5">
+                {analysisTypeRows.map((item) => {
+                  const meta = getAnalysisTypeMeta(item.type || item.label);
+                  const Icon = meta.icon;
+                  const pct =
+                    analysisTypeTotal > 0
+                      ? Math.round((item.count / analysisTypeTotal) * 100)
+                      : 0;
+                  const barWidth = Math.max(
+                    4,
+                    Math.round((item.count / analysisTypeMax) * 100)
+                  );
+
+                  return (
+                    <div key={item.label} className="group">
+                      <div className="mb-1.5 flex items-center justify-between gap-3">
+                        <div className="flex min-w-0 items-center gap-2.5">
+                          <span
+                            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
+                            style={{
+                              backgroundColor: meta.soft,
+                              color: meta.color,
+                            }}
+                          >
+                            <Icon size={15} strokeWidth={2.25} />
+                          </span>
+                          <span
+                            className="truncate text-sm font-bold capitalize"
+                            style={{ color: "var(--text-primary)" }}
+                          >
+                            {item.label}
+                          </span>
+                        </div>
+                        <div className="flex shrink-0 items-baseline gap-2">
+                          <span
+                            className="text-sm font-extrabold tabular-nums"
+                            style={{ color: "var(--text-primary)" }}
+                          >
+                            {item.count}
+                          </span>
+                          <span
+                            className="text-xs font-semibold tabular-nums"
+                            style={{ color: "var(--text-muted)" }}
+                          >
+                            {pct}%
+                          </span>
+                        </div>
+                      </div>
+                      <div
+                        className="h-2.5 overflow-hidden rounded-full"
+                        style={{ backgroundColor: "var(--bg-elevated)" }}
+                      >
+                        <div
+                          className="h-full rounded-full transition-all duration-500"
+                          style={{
+                            width: `${barWidth}%`,
+                            background: `linear-gradient(90deg, ${meta.color}, ${meta.tail})`,
+                          }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
           )}
         </ChartCard>
 
@@ -665,6 +740,45 @@ function EmptyChart({ text }) {
 
 function formatLabel(value = "") {
   return String(value).replace(/_/g, " ");
+}
+
+function getAnalysisTypeMeta(type = "") {
+  const key = String(type).toLowerCase().trim();
+  const map = {
+    url: {
+      icon: LinkIcon,
+      color: "#2563eb",
+      tail: "#06b6d4",
+      soft: "rgba(37, 99, 235, 0.12)",
+    },
+    text: {
+      icon: FileText,
+      color: "#0f766e",
+      tail: "#14b8a6",
+      soft: "rgba(20, 184, 166, 0.12)",
+    },
+    file: {
+      icon: Upload,
+      color: "#c2410c",
+      tail: "#fb923c",
+      soft: "rgba(251, 146, 60, 0.14)",
+    },
+    batch: {
+      icon: Layers,
+      color: "#7c3aed",
+      tail: "#a78bfa",
+      soft: "rgba(124, 58, 237, 0.12)",
+    },
+  };
+
+  return (
+    map[key] || {
+      icon: FileSearch,
+      color: "#1e3a8a",
+      tail: "#60a5fa",
+      soft: "rgba(30, 58, 138, 0.12)",
+    }
+  );
 }
 
 function formatDateTime(value) {

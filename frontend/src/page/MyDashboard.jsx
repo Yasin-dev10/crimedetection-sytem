@@ -15,8 +15,10 @@ import {
   RefreshCw,
   TrendingUp,
   AlertCircle,
+  FileSpreadsheet,
+  Download,
 } from "lucide-react";
-import { getMyHistory } from "../services";
+import { getMyHistory, exportDataset } from "../services";
 
 export default function MyDashboard() {
   const user = JSON.parse(localStorage.getItem("user") || "null");
@@ -27,6 +29,7 @@ export default function MyDashboard() {
   const [filter, setFilter] = useState("ALL"); // ALL | CRIME | SAFE
   const [loading, setLoading] = useState(true);
   const [error, setError]   = useState(null);
+  const [exporting, setExporting] = useState(false);
 
   const fetchData = async (p = 1) => {
     try {
@@ -43,6 +46,38 @@ export default function MyDashboard() {
   };
 
   useEffect(() => { fetchData(1); }, []);
+
+  const downloadDataset = async (format = "xlsx") => {
+    try {
+      setExporting(true);
+      setError(null);
+      const canSeeAll = user?.role === "admin" || user?.role === "investigator";
+      const res = await exportDataset({
+        format,
+        source: "all",
+        scope: canSeeAll ? "all" : "mine",
+      });
+
+      const blob = new Blob([res.data], {
+        type:
+          format === "csv"
+            ? "text/csv;charset=utf-8"
+            : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `BAREAI-dataset-${new Date().toISOString().slice(0, 10)}.${format}`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err.response?.data?.message || "Failed to export dataset.");
+    } finally {
+      setExporting(false);
+    }
+  };
 
   /* ── client-side search + filter ── */
   const filtered = useMemo(() => {
@@ -91,14 +126,39 @@ export default function MyDashboard() {
             </p>
           </div>
 
-          <button
-            onClick={() => fetchData(page)}
-            disabled={loading}
-            className="flex items-center gap-2 text-sm bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 px-4 py-2 rounded-xl transition disabled:opacity-50"
-          >
-            <RefreshCw size={15} className={loading ? "animate-spin" : ""} />
-            Refresh
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => downloadDataset("xlsx")}
+              disabled={exporting || loading}
+              className="flex items-center gap-2 text-sm border px-4 py-2 rounded-xl transition disabled:opacity-50"
+              style={{
+                backgroundColor: "var(--brand-soft)",
+                borderColor: "var(--brand-ring)",
+                color: "var(--text-primary)",
+              }}
+              title="Download collected dataset as Excel"
+            >
+              <FileSpreadsheet size={15} />
+              {exporting ? "Exporting…" : "Excel Dataset"}
+            </button>
+            <button
+              onClick={() => downloadDataset("csv")}
+              disabled={exporting || loading}
+              className="flex items-center gap-2 text-sm bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 px-4 py-2 rounded-xl transition disabled:opacity-50"
+              title="Download collected dataset as CSV"
+            >
+              <Download size={15} />
+              CSV
+            </button>
+            <button
+              onClick={() => fetchData(page)}
+              disabled={loading}
+              className="flex items-center gap-2 text-sm bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 px-4 py-2 rounded-xl transition disabled:opacity-50"
+            >
+              <RefreshCw size={15} className={loading ? "animate-spin" : ""} />
+              Refresh
+            </button>
+          </div>
         </div>
 
         {/* ── Error ── */}

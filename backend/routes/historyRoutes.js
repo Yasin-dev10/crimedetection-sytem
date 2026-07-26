@@ -3,9 +3,63 @@ const router = express.Router();
 
 const History = require("../model/History");
 const { protect, investigatorOrAdmin } = require("../middleware/authMiddleware");
+const {
+  buildDatasetWorkbook,
+  buildDatasetCsv,
+} = require("../services/datasetStore");
 
 const canViewAllHistory = (user) =>
   user && ["admin", "investigator"].includes(user.role);
+
+// Export collected analysis data as Excel (.xlsx) for dataset study / retraining
+// Query: ?source=all|analysis|facebook|website&scope=all|mine&format=xlsx|csv
+router.get("/dataset/export", protect, async (req, res) => {
+  try {
+    const format = String(req.query.format || "xlsx").toLowerCase();
+    const source = String(req.query.source || "all").toLowerCase();
+    const scope = String(req.query.scope || "all").toLowerCase();
+
+    const mineOnly = scope === "mine" || !canViewAllHistory(req.user);
+    const options = {
+      source: ["all", "analysis", "facebook", "website"].includes(source)
+        ? source
+        : "all",
+      userId: req.user._id,
+      mineOnly,
+    };
+
+    const stamp = new Date().toISOString().slice(0, 10);
+
+    if (format === "csv") {
+      const { csv, count } = await buildDatasetCsv(options);
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="BAREAI-dataset-${stamp}.csv"`
+      );
+      res.setHeader("X-Dataset-Count", String(count));
+      return res.send(csv);
+    }
+
+    const { buffer, count } = await buildDatasetWorkbook(options);
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    );
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="BAREAI-dataset-${stamp}.xlsx"`
+    );
+    res.setHeader("X-Dataset-Count", String(count));
+    return res.send(Buffer.from(buffer));
+  } catch (error) {
+    console.error("Dataset export error:", error);
+    res.status(500).json({
+      message: "Dataset export failed",
+      error: error.message,
+    });
+  }
+});
 
 // ── My History (per-user) ──────────────────────────────────────
 router.get("/my", protect, async (req, res) => {

@@ -8,11 +8,13 @@ import {
   History,
   Send,
   LogIn,
+  FileSpreadsheet,
 } from "lucide-react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import API from "../api";
 import { getStoredUser } from "../theme";
 import { renderCrimeHighlightedText } from "../utils/crimeHighlight";
+import { exportDataset } from "../services";
 
 export default function Analysis({ publicMode = false, embedded = false }) {
   const location = useLocation();
@@ -40,6 +42,7 @@ export default function Analysis({ publicMode = false, embedded = false }) {
   const [error, setError] = useState("");
   const [needsAccount, setNeedsAccount] = useState(false);
   const [sendingCase, setSendingCase] = useState(false);
+  const [exportingDataset, setExportingDataset] = useState(false);
   const [loadedFromHistory, setLoadedFromHistory] = useState(
     initialHistoryState.loadedFromHistory
   );
@@ -102,6 +105,36 @@ export default function Analysis({ publicMode = false, embedded = false }) {
       );
     } finally {
       setSendingCase(false);
+    }
+  };
+
+  const downloadDatasetExcel = async () => {
+    if (isGuest || exportingDataset) return;
+    try {
+      setExportingDataset(true);
+      setError("");
+      const canSeeAll =
+        user?.role === "admin" || user?.role === "investigator";
+      const res = await exportDataset({
+        format: "xlsx",
+        source: "all",
+        scope: canSeeAll ? "all" : "mine",
+      });
+      const blob = new Blob([res.data], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      });
+      const objectUrl = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = objectUrl;
+      a.download = `BAREAI-dataset-${new Date().toISOString().slice(0, 10)}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(objectUrl);
+    } catch (err) {
+      setError(err.response?.data?.message || "Failed to export dataset Excel.");
+    } finally {
+      setExportingDataset(false);
     }
   };
 
@@ -241,6 +274,27 @@ export default function Analysis({ publicMode = false, embedded = false }) {
                 : "Analyze text, URLs, files, or batch inputs for crime-related content."}
             </p>
           </div>
+          {!isGuest && (
+            <button
+              type="button"
+              onClick={downloadDatasetExcel}
+              disabled={exportingDataset}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl font-semibold border transition-colors disabled:opacity-50"
+              style={{
+                backgroundColor: "var(--brand-soft)",
+                borderColor: "var(--brand-ring)",
+                color: "var(--text-primary)",
+              }}
+              title="Download saved analyses as Excel dataset"
+            >
+              {exportingDataset ? (
+                <Loader2 className="animate-spin" size={18} />
+              ) : (
+                <FileSpreadsheet size={18} />
+              )}
+              {exportingDataset ? "Exporting…" : "Download Dataset Excel"}
+            </button>
+          )}
         </div>
       )}
 

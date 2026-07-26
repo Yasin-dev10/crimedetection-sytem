@@ -387,6 +387,24 @@ textarea, input, select, button {
   color: #334155 !important;
 }
 
+/* Keep readable light text on dark marketing surfaces */
+[data-theme="light"] .dark-surface,
+[data-theme="light"] .dark-surface .text-white,
+[data-theme="light"] .dark-surface .text-slate-100,
+[data-theme="light"] .dark-surface .text-slate-200,
+[data-theme="light"] .dark-surface .text-slate-300 {
+  color: #e2e8f0 !important;
+}
+
+[data-theme="light"] .dark-surface .text-slate-400,
+[data-theme="light"] .dark-surface .text-slate-500 {
+  color: #94a3b8 !important;
+}
+
+[data-theme="light"] .dark-surface .bg-clip-text.text-transparent {
+  -webkit-text-fill-color: #ffffff !important;
+}
+
 /* Gradient text fallback in light mode */
 [data-theme="light"] .bg-clip-text.text-transparent {
   -webkit-text-fill-color: #0f172a !important;

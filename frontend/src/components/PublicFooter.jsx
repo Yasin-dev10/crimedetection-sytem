@@ -13,7 +13,7 @@ export default function PublicFooter() {
   ];
 
   return (
-    <footer className="border-t border-[#cbd5e1] bg-[#0a0d14] text-white">
+    <footer className="dark-surface border-t border-[#cbd5e1] bg-[#0a0d14] text-white">
       <div className="mx-auto grid max-w-7xl gap-10 px-4 py-12 sm:px-6 lg:grid-cols-[1.4fr_1fr] lg:px-8">
         <div>
           <div className="flex items-center gap-3">

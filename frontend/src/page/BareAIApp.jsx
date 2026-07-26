@@ -96,7 +96,7 @@ export default function BareAIApp() {
 
       <main id="home" className="flex-1">
         {/* HERO SECTION */}
-        <section className="relative flex min-h-[92vh] items-center overflow-hidden bg-[#0a0d14] pt-16 text-white">
+        <section className="dark-surface relative flex min-h-[92vh] items-center overflow-hidden bg-[#0a0d14] pt-16 text-white">
           <img
             src={heroImage}
             alt="BAREAI intelligence workspace"
@@ -116,7 +116,7 @@ export default function BareAIApp() {
                 BAREAI
               </h1>
 
-              <p className="mt-6 max-w-xl text-base leading-relaxed text-slate-300 sm:text-lg">
+              <p className="mt-6 max-w-xl text-base leading-relaxed text-slate-200 sm:text-lg">
                 A secure crime intelligence platform for report analysis, blacklist monitoring,
                 investigation workflows, and operational decision support.
               </p>
@@ -212,7 +212,7 @@ export default function BareAIApp() {
         </section>
 
         {/* WORKFLOW SECTION */}
-        <section id="workflow" className="scroll-mt-20 bg-[#0a0f0c] px-4 py-16 text-white sm:px-6 lg:px-8">
+        <section id="workflow" className="dark-surface scroll-mt-20 bg-[#0a0f0c] px-4 py-16 text-white sm:px-6 lg:px-8">
           <div className="mx-auto max-w-7xl">
             <div className="grid gap-10 lg:grid-cols-[0.8fr_1.2fr] lg:items-start">
               <div>

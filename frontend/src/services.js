@@ -52,3 +52,11 @@ export const exportCrimeReports = async (format) => {
   });
   return response.data;
 };
+
+export const exportDataset = async ({ format = 'xlsx', source = 'all', scope = 'all' } = {}) => {
+  const response = await API.get('/history/dataset/export', {
+    params: { format, source, scope },
+    responseType: 'blob',
+  });
+  return response;
+};

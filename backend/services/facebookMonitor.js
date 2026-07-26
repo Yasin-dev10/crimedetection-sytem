@@ -7,6 +7,7 @@ const BlacklistItem = require("../model/BlacklistItem");
 const History = require("../model/History");
 const { createDailyBlacklistAlert } = require("./blacklistAlertService");
 const { dispatchCrimeDetection } = require("./crimeDetectionService");
+const { appendIncomingDataset } = require("./datasetStore");
 const { AI_MODEL_URL } = require("../config/aiModel");
 
 const CHROME_PATH = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
@@ -184,6 +185,8 @@ const analyzeFacebookPost = async ({ item, post }) => {
       ],
       priority: item.priority || "high",
     });
+
+    await appendIncomingDataset(history);
 
     let alertCreated = false;
 

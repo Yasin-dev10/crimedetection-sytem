@@ -18,6 +18,10 @@ out/
 *.log
 logs/
 
+# Collected runtime dataset (auto-saved from analyses)
+model/collected_dataset.xlsx
+model/collected_dataset.csv
+
 # IDEs and OS files
 .vscode/
 .idea/

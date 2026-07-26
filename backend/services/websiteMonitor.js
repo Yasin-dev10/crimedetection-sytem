@@ -8,6 +8,7 @@ const BlacklistItem = require("../model/BlacklistItem");
 const History = require("../model/History");
 const { createDailyBlacklistAlert } = require("./blacklistAlertService");
 const { dispatchCrimeDetection } = require("./crimeDetectionService");
+const { appendIncomingDataset } = require("./datasetStore");
 const { checkCrimeText } = require("./facebookMonitor");
 const { AI_MODEL_URL } = require("../config/aiModel");
 
@@ -456,6 +457,8 @@ const analyzeWebsitePage = async ({ item, pageUrl, text }) => {
       ],
       priority: item.priority || "high",
     });
+
+    await appendIncomingDataset(history);
   } catch (error) {
     if (error?.code === 11000) {
       const duplicate = await History.findOne({ postId });

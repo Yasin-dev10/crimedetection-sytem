@@ -8,6 +8,7 @@ const BlacklistItem = require("../model/BlacklistItem");
 const History = require("../model/History");
 const { createDailyBlacklistAlert } = require("../services/blacklistAlertService");
 const { dispatchCrimeDetection } = require("../services/crimeDetectionService");
+const { appendIncomingDataset } = require("../services/datasetStore");
 const { AI_MODEL_URL } = require("../config/aiModel");
 
 const AI_MODEL_TIMEOUT_MS = Number(process.env.AI_MODEL_TIMEOUT_MS || 30000);
@@ -114,7 +115,7 @@ const findBlacklistMatches = async ({ content, extractedText = "" }) => {
   });
 };
 
-const saveHistory = async ({ type, content, result, extractedText = "", userId = null }) => {
+const saveHistory = async ({ type, content, result, extractedText = "", userId = null, url = null }) => {
   const blacklistMatches = await findBlacklistMatches({
     content,
     extractedText,
@@ -128,10 +129,17 @@ const saveHistory = async ({ type, content, result, extractedText = "", userId =
     ? "high"
     : blacklistMatches[0]?.priority || "normal";
 
+  const resolvedUrl =
+    url ||
+    (type === "url" && /^https?:\/\//i.test(String(content || ""))
+      ? content
+      : null);
+
   const history = await History.create({
     type,
     sourceType: type,
     content,
+    url: resolvedUrl,
     prediction: result.prediction,
     confidence: result.confidence,
     isCrime: result.isCrime || blacklistMatches.length > 0 || false,
@@ -150,6 +158,8 @@ const saveHistory = async ({ type, content, result, extractedText = "", userId =
     priority,
     user: userId || null,
   });
+
+  await appendIncomingDataset(history);
 
   if (blacklistMatches.length > 0) {
     await Promise.all(
@@ -246,6 +256,7 @@ const analyzeUrl = async (req, res) => {
     const saved = await saveHistory({
       type: "url",
       content: url,
+      url,
       result: aiResult,
       extractedText,
       userId: req.user?._id || null,
