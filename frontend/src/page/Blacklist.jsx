@@ -102,9 +102,10 @@ export default function Blacklist() {
       setLoading(true);
       setError("");
       const res = await API.get("/blacklist");
-      setItems(dedupeItems(res.data || []));
+      setItems(dedupeItems(res.data));
     } catch (err) {
       setError(err.response?.data?.message || "Failed to load blacklist");
+      setItems([]);
     } finally {
       setLoading(false);
     }
@@ -410,9 +411,9 @@ export default function Blacklist() {
             )}
           </div>
 
-          <div className="flex flex-col gap-2.5 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+          <div className="flex flex-col gap-3">
             <div
-              className="inline-flex max-w-full flex-wrap items-center gap-1 rounded-2xl border p-1"
+              className="inline-flex w-full max-w-full flex-wrap items-center gap-1 rounded-2xl border p-1"
               style={{
                 backgroundColor: "var(--bg-surface)",
                 borderColor: "var(--border-base)",
@@ -459,7 +460,7 @@ export default function Blacklist() {
               </button>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex min-h-[52px] flex-wrap items-center gap-2">
               <button
                 type="button"
                 onClick={() => navigate("/blacklist/fake-crimes?tab=flags")}
@@ -1609,11 +1610,18 @@ function StatisticsView({ stats, loading, onDeleteItem, onViewDetails }) {
   }
 
   const { summary = {}, topItems = [], removableItems = [], allStats = [] } = stats;
-  const allItems = (allStats.length > 0 ? allStats : topItems).map((item) => ({
-    ...item,
-    _id: String(item._id),
-  }));
-  const removableIds = new Set(removableItems.map((item) => String(item._id)));
+  const normalizedAllStats = normalizeStatsItems(allStats);
+  const normalizedTopItems = normalizeStatsItems(topItems);
+  const normalizedRemovableItems = normalizeStatsItems(removableItems);
+  const allItems = (normalizedAllStats.length > 0 ? normalizedAllStats : normalizedTopItems).map(
+    (item) => ({
+      ...item,
+      _id: String(item._id),
+    })
+  );
+  const removableIds = new Set(
+    normalizedRemovableItems.map((item) => String(item._id))
+  );
 
   const displayedItems = showRemovableOnly
     ? allItems.filter((item) => item.canBeRemoved || removableIds.has(item._id))
@@ -1737,7 +1745,7 @@ function StatisticsView({ stats, loading, onDeleteItem, onViewDetails }) {
               Show all ({allItems.length})
             </button>
 
-            {removableItems.length > 0 && (
+            {normalizedRemovableItems.length > 0 && (
               <button
                 type="button"
                 onClick={openSuggested}
@@ -1763,7 +1771,7 @@ function StatisticsView({ stats, loading, onDeleteItem, onViewDetails }) {
                 ) : (
                   <ChevronDown size={14} />
                 )}
-                Suggested ({removableItems.length})
+                Suggested ({normalizedRemovableItems.length})
               </button>
             )}
           </div>
@@ -1965,9 +1973,13 @@ function ItemStatCard({ item, onViewDetails, onDelete, canRemove = false }) {
 }
 
 function dedupeItems(list) {
+  if (!Array.isArray(list)) return [];
+
   const seen = new Set();
 
   return list.filter((item) => {
+    if (!item || typeof item !== "object") return false;
+
     const key = `${item.type}:${String(item.value || "")
       .trim()
       .replace(/\/+$/, "")
@@ -2015,4 +2027,9 @@ function getNameFromWebsiteUrl(value = "") {
   } catch {
     return "";
   }
+}
+
+function normalizeStatsItems(list) {
+  if (!Array.isArray(list)) return [];
+  return list.filter((item) => item && typeof item === "object");
 }

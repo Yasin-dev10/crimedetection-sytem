@@ -7,7 +7,7 @@ dotenv.config();
 
 const adminSeed = {
   name: "BAREAI Admin",
-  email: "nastexofeysal@gmail.com",
+  email: "yasindev216@gmail.com",
   password: "Password@2026",
 };
 

@@ -78,7 +78,7 @@ export default function RegisterPage() {
     if (!/^\+?\d{7,15}$/.test(normalizedPhone)) {
       Swal.fire({
         title: "Invalid phone number",
-        text: "Please enter a valid phone number (digits only, e.g. +252611234567).",
+        text: "Please enter a valid phone number (digits only, e.g. ).",
         icon: "error",
         ...swalBase,
         confirmButtonColor: "#c44b4b",
@@ -175,7 +175,7 @@ export default function RegisterPage() {
                 <AuthInput name="email" type="email" value={form.email} onChange={handleChange} placeholder="name@example.com" required />
               </AuthField>
               <AuthField label="Phone number">
-                <AuthInput name="phone" type="tel" value={form.phone} onChange={handleChange} placeholder="+252 61 1234567" required />
+                <AuthInput name="phone" type="tel" value={form.phone} onChange={handleChange} placeholder="Enter Your Number" required />
               </AuthField>
               <AuthField label="Password">
                 <AuthInput name="password" type="password" minLength={6} value={form.password} onChange={handleChange} placeholder="At least 6 characters" required />

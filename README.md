@@ -24,6 +24,7 @@ BAREAI is an AI-powered crime detection and investigation platform focused on So
 ## Features
 
 ### Crime analysis
+
 - Classify text as **crime-related** or **not crime-related** (ML model + Somali keyword rules)
 - Analyze pasted text, URLs, uploaded files (PDF / Word), and batch content
 - Detect Somali locations (e.g. districts in Muqdisho, Kismaayo, Hargeysa, and more)
@@ -31,12 +32,14 @@ BAREAI is an AI-powered crime detection and investigation platform focused on So
 - Public guest analysis with usage limits; registered users get full history
 
 ### Investigation workflow
+
 - Create and assign investigation cases
 - Auto-generated investigation reports
 - Notifications (in-app; optional email / SMS)
 - Export reports (PDF / Excel)
 
 ### Admin & security
+
 - Role-based access: **admin**, **investigator**, **user**
 - User management and investigator onboarding (email verification + generated password)
 - Blacklist management with alerts
@@ -45,6 +48,7 @@ BAREAI is an AI-powered crime detection and investigation platform focused on So
 - Facebook post monitoring and website page monitoring
 
 ### Dashboard
+
 - Admin analytics (detections, cases, trends)
 - Case management for admins and investigators
 - Reports and audit log views
@@ -64,20 +68,20 @@ BAREAI is an AI-powered crime detection and investigation platform focused on So
                            MongoDB database
 ```
 
-1. **Frontend** — React SPA for public analysis, auth, dashboards, and case tools  
-2. **Backend** — Express API: auth, analysis orchestration, cases, blacklist, reports, monitors  
-3. **AI model** — Flask service loads `crime_model.pkl` + `vectorizer.pkl` and returns predictions  
+1. **Frontend** — React SPA for public analysis, auth, dashboards, and case tools
+2. **Backend** — Express API: auth, analysis orchestration, cases, blacklist, reports, monitors
+3. **AI model** — Flask service loads `crime_model.pkl` + `vectorizer.pkl` and returns predictions
 
 ---
 
 ## Tech stack
 
-| Layer | Technologies |
-|--------|----------------|
-| Frontend | React 19, Vite 8, Tailwind CSS 4, React Router, Recharts, Framer Motion, SweetAlert2, jsPDF |
-| Backend | Node.js, Express 5, MongoDB (Mongoose), JWT, bcrypt, Multer, Cheerio, Puppeteer, Nodemailer, Twilio, ExcelJS |
-| AI | Python, Flask, scikit-learn, joblib |
-| Data | MongoDB |
+| Layer    | Technologies                                                                                                 |
+| -------- | ------------------------------------------------------------------------------------------------------------ |
+| Frontend | React 19, Vite 8, Tailwind CSS 4, React Router, Recharts, Framer Motion, SweetAlert2, jsPDF                  |
+| Backend  | Node.js, Express 5, MongoDB (Mongoose), JWT, bcrypt, Multer, Cheerio, Puppeteer, Nodemailer, Twilio, ExcelJS |
+| AI       | Python, Flask, scikit-learn, joblib                                                                          |
+| Data     | MongoDB                                                                                                      |
 
 ---
 
@@ -180,23 +184,23 @@ App: [http://localhost:5173](http://localhost:5173)
 
 Copy `backend/.env.example` to `backend/.env` and configure:
 
-| Variable | Description |
-|----------|-------------|
-| `PORT` | Backend port (default `5000`) |
-| `MONGO_URI` | MongoDB connection string |
-| `JWT_SECRET` | Secret for signing auth tokens |
-| `FRONTEND_URL` | Frontend origin (e.g. `http://localhost:5173`) |
-| `AI_MODEL_URL` | Predict endpoint (default `http://localhost:5001/predict`) |
-| `AI_MODEL_HEALTH_URL` | Optional health URL for the AI service |
-| `AI_MODEL_TIMEOUT_MS` | AI request timeout (default `30000`) |
-| `EMAIL_USER` / `EMAIL_PASS` | SMTP credentials for verification & alerts |
-| `FACEBOOK_ACCESS_TOKEN` | Graph API token for Facebook monitoring |
-| `FACEBOOK_MONITOR_INTERVAL_MS` | Poll interval (default `60000`) |
-| `TWILIO_ACCOUNT_SID` | Twilio account SID (optional) |
-| `TWILIO_AUTH_TOKEN` | Twilio auth token (optional) |
-| `TWILIO_VERIFY_SERVICE_SID` | Twilio Verify service (phone verification) |
-| `TWILIO_PHONE_NUMBER` | Sender number for assignment SMS |
-| `TWILIO_MESSAGING_SERVICE_SID` | Alternative to `TWILIO_PHONE_NUMBER` |
+| Variable                         | Description                                                 |
+| -------------------------------- | ----------------------------------------------------------- |
+| `PORT`                         | Backend port (default`5000`)                              |
+| `MONGO_URI`                    | MongoDB connection string                                   |
+| `JWT_SECRET`                   | Secret for signing auth tokens                              |
+| `FRONTEND_URL`                 | Frontend origin (e.g.`http://localhost:5173`)             |
+| `AI_MODEL_URL`                 | Predict endpoint (default`http://localhost:5001/predict`) |
+| `AI_MODEL_HEALTH_URL`          | Optional health URL for the AI service                      |
+| `AI_MODEL_TIMEOUT_MS`          | AI request timeout (default`30000`)                       |
+| `EMAIL_USER` / `EMAIL_PASS`  | SMTP credentials for verification & alerts                  |
+| `FACEBOOK_ACCESS_TOKEN`        | Graph API token for Facebook monitoring                     |
+| `FACEBOOK_MONITOR_INTERVAL_MS` | Poll interval (default`60000`)                            |
+| `TWILIO_ACCOUNT_SID`           | Twilio account SID (optional)                               |
+| `TWILIO_AUTH_TOKEN`            | Twilio auth token (optional)                                |
+| `TWILIO_VERIFY_SERVICE_SID`    | Twilio Verify service (phone verification)                  |
+| `TWILIO_PHONE_NUMBER`          | Sender number for assignment SMS                            |
+| `TWILIO_MESSAGING_SERVICE_SID` | Alternative to`TWILIO_PHONE_NUMBER`                       |
 
 The frontend API base URL defaults to `http://localhost:5000/api` in `frontend/src/api.js`. Update it if the backend host/port changes.
 
@@ -204,11 +208,11 @@ The frontend API base URL defaults to `http://localhost:5000/api` in `frontend/s
 
 ## User roles
 
-| Role | Home route | Capabilities |
-|------|------------|--------------|
-| **admin** | `/dashboard` | Dashboard, users, blacklist, cases, reports, audit logs, settings |
-| **investigator** | `/cases` | Cases, blacklist, reports, profile, settings |
-| **user** | `/analysis` | Crime analysis, profile |
+| Role                   | Home route     | Capabilities                                                      |
+| ---------------------- | -------------- | ----------------------------------------------------------------- |
+| **admin**        | `/dashboard` | Dashboard, users, blacklist, cases, reports, audit logs, settings |
+| **investigator** | `/cases`     | Cases, blacklist, reports, profile, settings                      |
+| **user**         | `/analysis`  | Crime analysis, profile                                           |
 
 Public guests can use the landing analysis flow with limited usage.
 
@@ -227,28 +231,28 @@ Credentials are printed in the terminal (defined in `backend/seedAdmin.js`). Cha
 
 Base path: `http://localhost:5000/api`
 
-| Prefix | Purpose |
-|--------|---------|
-| `/auth` | Register, login, logout, email verify, password flows, create investigator |
-| `/analysis` | Text / URL / file / batch crime analysis |
-| `/model` | AI model info / status |
-| `/history` | Analysis history |
-| `/dashboard` | Admin dashboard stats |
-| `/investigation` | Cases and investigation reports |
-| `/notifications` | In-app notifications |
-| `/blacklist` | Blacklist items and alerts |
-| `/users` | User management |
-| `/reports` | Reporting endpoints |
-| `/audit-logs` | Audit trail |
+| Prefix             | Purpose                                                                    |
+| ------------------ | -------------------------------------------------------------------------- |
+| `/auth`          | Register, login, logout, email verify, password flows, create investigator |
+| `/analysis`      | Text / URL / file / batch crime analysis                                   |
+| `/model`         | AI model info / status                                                     |
+| `/history`       | Analysis history                                                           |
+| `/dashboard`     | Admin dashboard stats                                                      |
+| `/investigation` | Cases and investigation reports                                            |
+| `/notifications` | In-app notifications                                                       |
+| `/blacklist`     | Blacklist items and alerts                                                 |
+| `/users`         | User management                                                            |
+| `/reports`       | Reporting endpoints                                                        |
+| `/audit-logs`    | Audit trail                                                                |
 
 AI model endpoints (`:5001`):
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/health` | Service health |
-| `GET` | `/api/model/info` | Model metadata |
-| `POST` | `/predict` | Classify text (`{ "text": "..." }`) |
-| `POST` | `/api/classify/text` | Alias of `/predict` |
+| Method   | Path                   | Description                           |
+| -------- | ---------------------- | ------------------------------------- |
+| `GET`  | `/health`            | Service health                        |
+| `GET`  | `/api/model/info`    | Model metadata                        |
+| `POST` | `/predict`           | Classify text (`{ "text": "..." }`) |
+| `POST` | `/api/classify/text` | Alias of`/predict`                  |
 
 ---
 
@@ -283,34 +287,40 @@ python app.py
 
 ## Default ports
 
-| Service | Port |
-|---------|------|
-| Frontend | `5173` |
-| Backend | `5000` |
-| AI model | `5001` |
-| MongoDB | `27017` (local default) |
+| Service  | Port                      |
+| -------- | ------------------------- |
+| Frontend | `5173`                  |
+| Backend  | `5000`                  |
+| AI model | `5001`                  |
+| MongoDB  | `27017` (local default) |
 
 ---
 
 ## Troubleshooting
 
-**Analysis fails / timeout**  
-- Confirm the AI service is running on `:5001` and `crime_model.pkl` / `vectorizer.pkl` exist in `ai-model/`.  
+**Analysis fails / timeout**
+
+- Confirm the AI service is running on `:5001` and `crime_model.pkl` / `vectorizer.pkl` exist in `ai-model/`.
 - Check `AI_MODEL_URL` in `backend/.env`.
 
-**Cannot connect to MongoDB**  
+**Cannot connect to MongoDB**
+
 - Verify `MONGO_URI` and that MongoDB is running.
 
-**Login / JWT errors**  
+**Login / JWT errors**
+
 - Set a strong `JWT_SECRET` and re-seed or re-register if needed.
 
-**Emails not sending**  
+**Emails not sending**
+
 - Use a valid `EMAIL_USER` and app password in `EMAIL_PASS`. Set `FRONTEND_URL` so verification links point to the correct origin.
 
-**Facebook monitor silent**  
+**Facebook monitor silent**
+
 - Provide `FACEBOOK_ACCESS_TOKEN`. The monitor starts with the backend; check backend logs for startup errors.
 
-**SMS / phone verification**  
+**SMS / phone verification**
+
 - Configure Twilio vars, then run `npm run twilio:setup` and the test scripts as needed.
 
 ---
