@@ -374,12 +374,12 @@ export default function Analysis({ publicMode = false, embedded = false }) {
                   Upload File
                 </h3>
                 <p className="text-sm mb-4" style={{ color: "var(--text-muted)" }}>
-                  Supported files: PDF, DOCX, TXT
+                  Supported files: PDF, DOC, DOCX, TXT, CSV, JSON, HTML, MD, RTF, XLSX
                 </p>
 
                 <input
                   type="file"
-                  accept=".pdf,.docx,.txt"
+                  accept=".pdf,.doc,.docx,.txt,.csv,.json,.html,.htm,.md,.markdown,.rtf,.xlsx"
                   onChange={(e) => setFile(e.target.files[0])}
                   className="block w-full text-sm"
                   style={{ color: "var(--text-secondary)" }}

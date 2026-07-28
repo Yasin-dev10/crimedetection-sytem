@@ -1,8 +1,10 @@
 const axios = require("axios");
 const cheerio = require("cheerio");
 const fs = require("fs");
+const path = require("path");
 const pdfParse = require("pdf-parse");
 const mammoth = require("mammoth");
+const ExcelJS = require("exceljs");
 
 const BlacklistItem = require("../model/BlacklistItem");
 const History = require("../model/History");
@@ -22,8 +24,133 @@ const CRIME_PREDICTIONS = new Set([
   "true",
 ]);
 
+const ALLOWED_UPLOAD_EXTENSIONS = new Set([
+  ".pdf",
+  ".docx",
+  ".doc",
+  ".txt",
+  ".csv",
+  ".json",
+  ".html",
+  ".htm",
+  ".md",
+  ".markdown",
+  ".rtf",
+  ".xlsx",
+]);
+
 const normalize = (value = "") => value.toString().toLowerCase();
 const trimEvidence = (value = "") => String(value || "").slice(0, 12000);
+
+const getFileExtension = (fileName = "") =>
+  path.extname(String(fileName)).toLowerCase();
+
+const stripHtmlToText = (html = "") => {
+  const $ = cheerio.load(html);
+  $("script, style, noscript").remove();
+  return $.root().text().replace(/\s+/g, " ").trim();
+};
+
+const stripRtfToText = (rtf = "") =>
+  String(rtf)
+    .replace(/\\'[0-9a-fA-F]{2}/g, " ")
+    .replace(/\\[a-zA-Z]+\d* ?/g, " ")
+    .replace(/[{}]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+const extractExcelText = async (filePath) => {
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.readFile(filePath);
+
+  const lines = [];
+
+  workbook.eachSheet((sheet) => {
+    sheet.eachRow({ includeEmpty: false }, (row) => {
+      const values = row.values
+        .slice(1)
+        .map((cell) => {
+          if (cell == null) return "";
+          if (typeof cell === "object") {
+            if (cell.text) return String(cell.text);
+            if (cell.result != null) return String(cell.result);
+            if (cell.richText) {
+              return cell.richText.map((part) => part.text || "").join("");
+            }
+            return "";
+          }
+          return String(cell);
+        })
+        .map((value) => value.trim())
+        .filter(Boolean);
+
+      if (values.length) {
+        lines.push(values.join(" "));
+      }
+    });
+  });
+
+  return lines.join("\n").trim();
+};
+
+const extractTextFromUploadedFile = async (filePath, originalName = "") => {
+  const extension = getFileExtension(originalName);
+
+  if (!ALLOWED_UPLOAD_EXTENSIONS.has(extension)) {
+    const error = new Error(
+      "Unsupported file type. Allowed: PDF, DOC, DOCX, TXT, CSV, JSON, HTML, MD, RTF, XLSX"
+    );
+    error.status = 400;
+    throw error;
+  }
+
+  if (extension === ".pdf") {
+    const dataBuffer = fs.readFileSync(filePath);
+    const pdfData = await pdfParse(dataBuffer);
+    return String(pdfData.text || "").trim();
+  }
+
+  if (extension === ".docx" || extension === ".doc") {
+    try {
+      const result = await mammoth.extractRawText({ path: filePath });
+      return String(result.value || "").trim();
+    } catch (error) {
+      if (extension === ".doc") {
+        const friendly = new Error(
+          "Old .DOC format could not be read. Please save as .DOCX and upload again."
+        );
+        friendly.status = 400;
+        throw friendly;
+      }
+      throw error;
+    }
+  }
+
+  if (extension === ".xlsx") {
+    return extractExcelText(filePath);
+  }
+
+  const raw = fs.readFileSync(filePath, "utf8");
+
+  if (extension === ".html" || extension === ".htm") {
+    return stripHtmlToText(raw);
+  }
+
+  if (extension === ".rtf") {
+    return stripRtfToText(raw);
+  }
+
+  if (extension === ".json") {
+    try {
+      return JSON.stringify(JSON.parse(raw), null, 2);
+    } catch {
+      return String(raw || "").trim();
+    }
+  }
+
+  // .txt, .csv, .md, .markdown
+  return String(raw || "").trim();
+};
 
 const removeTempFile = (filePath) => {
   if (!filePath) return;
@@ -290,28 +417,15 @@ const analyzeFile = async (req, res) => {
       return res.status(400).json({ message: "File is required" });
     }
 
-    let extractedText = "";
     filePath = req.file.path;
-    const fileName = req.file.originalname.toLowerCase();
-
-    if (fileName.endsWith(".pdf")) {
-      const dataBuffer = fs.readFileSync(filePath);
-      const pdfData = await pdfParse(dataBuffer);
-      extractedText = pdfData.text;
-    } else if (fileName.endsWith(".docx")) {
-      const result = await mammoth.extractRawText({ path: filePath });
-      extractedText = result.value;
-    } else if (fileName.endsWith(".txt")) {
-      extractedText = fs.readFileSync(filePath, "utf8");
-    } else {
-      removeTempFile(filePath);
-      filePath = null;
-      return res.status(400).json({
-        message: "Only PDF, DOCX, TXT files are allowed",
-      });
-    }
+    const extractedText = await extractTextFromUploadedFile(
+      filePath,
+      req.file.originalname
+    );
 
     if (!extractedText || extractedText.trim() === "") {
+      removeTempFile(filePath);
+      filePath = null;
       return res.status(400).json({
         message: "No readable text found in file",
       });
@@ -344,8 +458,8 @@ const analyzeFile = async (req, res) => {
     removeTempFile(filePath);
     console.error("FILE ANALYSIS ERROR:", error.response?.data || error.message);
 
-    res.status(500).json({
-      message: "File analysis failed",
+    res.status(error.status || 500).json({
+      message: error.status === 400 ? error.message : "File analysis failed",
       error: error.response?.data || error.message,
     });
   }
