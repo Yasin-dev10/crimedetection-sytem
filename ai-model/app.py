@@ -4,6 +4,8 @@ import joblib
 import re
 from pathlib import Path
 
+from preprocessing import preprocess_text
+
 app = Flask(__name__)
 CORS(app)
 
@@ -89,12 +91,18 @@ def make_response(text):
     locations = find_locations(text)
     matched_keyword = find_crime_keyword(text)
 
-    vector = vectorizer.transform([text])
+    # Same preprocessing as training notebook (no train/serve skew)
+    processed = preprocess_text(text)
+    vector = vectorizer.transform([processed])
     prediction = str(model.predict(vector)[0])
     confidence = 90.0
 
     if hasattr(model, "predict_proba"):
         confidence = round(max(model.predict_proba(vector)[0]) * 100, 2)
+    elif hasattr(model, "decision_function"):
+        # Map decision scores to a rough 50-99 confidence band
+        score = float(model.decision_function(vector)[0])
+        confidence = round(min(99.0, max(50.0, 50.0 + abs(score) * 10.0)), 2)
 
     model_is_crime = is_crime_prediction(prediction)
     is_crime = model_is_crime or matched_keyword is not None
@@ -142,6 +150,7 @@ def model_info():
         "trainingDataset": str(TRAINING_DIR / "dataset.csv.csv"),
         "features": ["text", "url", "file", "batch"],
         "predictEndpoint": "/predict",
+        "preprocessing": "ai-model/preprocessing.py",
     })
 
 # PREDICT
