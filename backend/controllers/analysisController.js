@@ -1,5 +1,4 @@
 const axios = require("axios");
-const cheerio = require("cheerio");
 const fs = require("fs");
 const path = require("path");
 const pdfParse = require("pdf-parse");
@@ -11,7 +10,13 @@ const History = require("../model/History");
 const { createDailyBlacklistAlert } = require("../services/blacklistAlertService");
 const { dispatchCrimeDetection } = require("../services/crimeDetectionService");
 const { appendIncomingDataset } = require("../services/datasetStore");
-const { AI_MODEL_URL } = require("../config/aiModel");
+const { fetchPageSafely } = require("../services/websiteMonitor");
+const { AI_MODEL_URL, aiModelRequestConfig } = require("../config/aiModel");
+const { assertSomaliOnly } = require("../utils/somaliLanguage");
+const {
+  extractCleanPageText,
+  cleanExtractedText,
+} = require("../utils/pageTextCleaner");
 
 const AI_MODEL_TIMEOUT_MS = Number(process.env.AI_MODEL_TIMEOUT_MS || 30000);
 const CRIME_PREDICTIONS = new Set([
@@ -45,11 +50,7 @@ const trimEvidence = (value = "") => String(value || "").slice(0, 12000);
 const getFileExtension = (fileName = "") =>
   path.extname(String(fileName)).toLowerCase();
 
-const stripHtmlToText = (html = "") => {
-  const $ = cheerio.load(html);
-  $("script, style, noscript").remove();
-  return $.root().text().replace(/\s+/g, " ").trim();
-};
+const stripHtmlToText = (html = "") => extractCleanPageText(html, 12000);
 
 const stripRtfToText = (rtf = "") =>
   String(rtf)
@@ -197,7 +198,7 @@ const predictText = async (text) => {
   const response = await axios.post(
     AI_MODEL_URL,
     { text },
-    { timeout: AI_MODEL_TIMEOUT_MS }
+    aiModelRequestConfig({ timeout: AI_MODEL_TIMEOUT_MS })
   );
 
   return normalizeAiResult(response.data);
@@ -321,7 +322,16 @@ const analyzeText = async (req, res) => {
     const { text } = req.body;
 
     if (!text || text.trim() === "") {
-      return res.status(400).json({ message: "Text is required" });
+      return res.status(400).json({ message: "Qoraalka waa loo baahan yahay." });
+    }
+
+    const languageCheck = assertSomaliOnly(text);
+    if (!languageCheck.ok) {
+      return res.status(400).json({
+        message: languageCheck.message,
+        languageRejected: true,
+        reason: languageCheck.reason,
+      });
     }
 
     const aiResult = await predictText(text);
@@ -345,7 +355,6 @@ const analyzeText = async (req, res) => {
 
     res.status(500).json({
       message: "Text analysis failed",
-      error: error.response?.data || error.message,
     });
   }
 };
@@ -358,45 +367,44 @@ const analyzeUrl = async (req, res) => {
       return res.status(400).json({ message: "URL is required" });
     }
 
-    const page = await axios.get(url, {
-      timeout: 10000,
-      headers: { "User-Agent": "Mozilla/5.0" },
-    });
-
-    const $ = cheerio.load(page.data);
-    $("script, style, nav, footer").remove();
-
-    const extractedText = $("body")
-      .text()
-      .replace(/\s+/g, " ")
-      .trim()
-      .slice(0, 8000);
+    const { html } = await fetchPageSafely(url);
+    const extractedText = extractCleanPageText(html, 8000);
 
     if (!extractedText) {
       return res.status(400).json({
-        message: "No readable text found from URL",
+        message: "URL-ka wax qoraal ah oo la akhriyi karo lagama helin.",
+      });
+    }
+
+    const languageCheck = assertSomaliOnly(extractedText);
+    if (!languageCheck.ok) {
+      return res.status(400).json({
+        message: languageCheck.message,
+        languageRejected: true,
+        reason: languageCheck.reason,
       });
     }
 
     const aiResult = await predictText(extractedText);
+    const displayText = cleanExtractedText(extractedText, 12000);
 
     const saved = await saveHistory({
       type: "url",
       content: url,
       url,
       result: aiResult,
-      extractedText,
+      extractedText: displayText,
       userId: req.user?._id || null,
     });
 
     res.status(200).json({
       message: "URL analysis completed",
       url,
-      extractedLength: extractedText.length,
-      postText: trimEvidence(extractedText),
+      extractedLength: displayText.length,
+      postText: trimEvidence(displayText),
       historyId: saved.history._id,
       result: resultWithSavedDecision(aiResult, saved, {
-        postText: trimEvidence(extractedText),
+        postText: trimEvidence(displayText),
       }),
     });
   } catch (error) {
@@ -404,7 +412,6 @@ const analyzeUrl = async (req, res) => {
 
     res.status(500).json({
       message: "URL analysis failed",
-      error: error.response?.data || error.message,
     });
   }
 };
@@ -427,11 +434,23 @@ const analyzeFile = async (req, res) => {
       removeTempFile(filePath);
       filePath = null;
       return res.status(400).json({
-        message: "No readable text found in file",
+        message: "Faylka wax qoraal ah oo la akhriyi karo kuma jiro.",
       });
     }
 
-    const aiResult = await predictText(extractedText.slice(0, 8000));
+    const textForModel = extractedText.slice(0, 8000);
+    const languageCheck = assertSomaliOnly(textForModel);
+    if (!languageCheck.ok) {
+      removeTempFile(filePath);
+      filePath = null;
+      return res.status(400).json({
+        message: languageCheck.message,
+        languageRejected: true,
+        reason: languageCheck.reason,
+      });
+    }
+
+    const aiResult = await predictText(textForModel);
 
     const saved = await saveHistory({
       type: "file",
@@ -460,7 +479,6 @@ const analyzeFile = async (req, res) => {
 
     res.status(error.status || 500).json({
       message: error.status === 400 ? error.message : "File analysis failed",
-      error: error.response?.data || error.message,
     });
   }
 };
@@ -482,19 +500,22 @@ const analyzeBatch = async (req, res) => {
         let textToAnalyze = item;
 
         if (type === "url") {
-          const page = await axios.get(item, {
-            timeout: 10000,
-            headers: { "User-Agent": "Mozilla/5.0" },
+          const { html } = await fetchPageSafely(item);
+          textToAnalyze = extractCleanPageText(html, 8000);
+        } else {
+          textToAnalyze = cleanExtractedText(item, 8000);
+        }
+
+        const languageCheck = assertSomaliOnly(textToAnalyze);
+        if (!languageCheck.ok) {
+          results.push({
+            input: item,
+            success: false,
+            message: languageCheck.message,
+            languageRejected: true,
+            reason: languageCheck.reason,
           });
-
-          const $ = cheerio.load(page.data);
-          $("script, style, nav, footer").remove();
-
-          textToAnalyze = $("body")
-            .text()
-            .replace(/\s+/g, " ")
-            .trim()
-            .slice(0, 8000);
+          continue;
         }
 
         const aiResult = await predictText(textToAnalyze);
@@ -517,10 +538,11 @@ const analyzeBatch = async (req, res) => {
           }),
         });
       } catch (err) {
+        console.error("BATCH ITEM ANALYSIS ERROR:", err.response?.data || err.message);
         results.push({
           input: item,
           success: false,
-          error: err.message,
+          message: "Item analysis failed",
         });
       }
     }
@@ -535,7 +557,6 @@ const analyzeBatch = async (req, res) => {
 
     res.status(500).json({
       message: "Batch analysis failed",
-      error: error.response?.data || error.message,
     });
   }
 };

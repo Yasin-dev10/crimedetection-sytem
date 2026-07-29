@@ -8,7 +8,7 @@ const History = require("../model/History");
 const { createDailyBlacklistAlert } = require("./blacklistAlertService");
 const { dispatchCrimeDetection } = require("./crimeDetectionService");
 const { appendIncomingDataset } = require("./datasetStore");
-const { AI_MODEL_URL } = require("../config/aiModel");
+const { AI_MODEL_URL, aiModelRequestConfig } = require("../config/aiModel");
 
 const CHROME_PATH = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
 
@@ -49,6 +49,8 @@ const checkCrimeText = (text) => {
   const matched = CRIME_KEYWORDS.find((w) => lower.includes(w));
 
   return {
+    // Used only as emergency fallback when the AI model is unreachable.
+    // Keywords alone must not override a live model decision.
     isCrime: Boolean(matched),
     matchedKeyword: matched || null,
     prediction: matched ? "CRIME-RELATED" : "NOT CRIME",
@@ -133,35 +135,37 @@ const analyzeFacebookPost = async ({ item, post }) => {
     }
 
     let aiResult;
+    let usedAiFallback = false;
 
     try {
       const res = await axios.post(
         AI_MODEL_URL,
         { text: message },
-        { timeout: 10000 }
+        aiModelRequestConfig({ timeout: 10000 })
       );
 
       aiResult = res.data;
     } catch (error) {
       console.log("AI model fallback keyword check:", error.message);
+      usedAiFallback = true;
       aiResult = checkCrimeText(message);
     }
 
     const keywordResult = checkCrimeText(message);
     const predictionText = String(aiResult.prediction || "").toUpperCase();
 
-    const isCrime =
-      aiResult.isCrime === true ||
-      aiResult.is_crime === true ||
-      predictionText === "CRIME-RELATED" ||
-      predictionText === "CRIME RELATED" ||
-      keywordResult.isCrime;
+    // Live model decides; keywords only mark evidence. Keyword forces crime only if AI is down.
+    const isCrime = usedAiFallback
+      ? Boolean(keywordResult.isCrime)
+      : aiResult.isCrime === true ||
+        aiResult.is_crime === true ||
+        predictionText === "CRIME-RELATED" ||
+        predictionText === "CRIME RELATED";
 
     const finalPrediction = isCrime ? "CRIME-RELATED" : "NOT CRIME";
 
-    const finalConfidence = isCrime
-      ? Math.max(aiResult.confidence || 0, keywordResult.confidence || 95)
-      : aiResult.confidence || keywordResult.confidence || 50;
+    const finalConfidence =
+      aiResult.confidence || (usedAiFallback ? keywordResult.confidence : 50) || 50;
 
     history = await History.create({
       type: "url",
@@ -169,12 +173,13 @@ const analyzeFacebookPost = async ({ item, post }) => {
       content: message,
       url: post.url,
       postId,
+      publishedAt: post.publishedAt || null,
       authorName,
       pageName,
       prediction: finalPrediction,
       confidence: finalConfidence,
       isCrime,
-      matchedKeyword: aiResult.matchedKeyword || keywordResult.matchedKeyword,
+      matchedKeyword: aiResult.matchedKeyword || aiResult.matched_keyword || keywordResult.matchedKeyword,
       blacklistMatches: [
         {
           item: item._id,
@@ -219,20 +224,24 @@ const analyzeFacebookPost = async ({ item, post }) => {
   }
 };
 
-const scrapeFacebookPosts = async (pageUrl) => {
+const scrapeFacebookPosts = async (pageUrl, options = {}) => {
   let browser;
 
   try {
+    const puppeteerArgs = [
+      "--disable-dev-shm-usage",
+      "--disable-notifications",
+      "--disable-blink-features=AutomationControlled",
+    ];
+
+    if (process.env.PUPPETEER_NO_SANDBOX === "true") {
+      puppeteerArgs.push("--no-sandbox", "--disable-setuid-sandbox");
+    }
+
     browser = await puppeteer.launch({
       headless: true,
       executablePath: CHROME_PATH,
-      args: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
-        "--disable-notifications",
-        "--disable-blink-features=AutomationControlled",
-      ],
+      args: puppeteerArgs,
       defaultViewport: {
         width: 1366,
         height: 768,
@@ -256,41 +265,112 @@ const scrapeFacebookPosts = async (pageUrl) => {
 
     await new Promise((resolve) => setTimeout(resolve, 8000));
 
-    for (let i = 0; i < 4; i += 1) {
-      await page.evaluate(() => window.scrollBy(0, 2000));
-      await new Promise((resolve) => setTimeout(resolve, 3000));
-    }
+    // Facebook virtualizes its feed: after scrolling, older articles are often
+    // removed from the DOM. Collect every visible batch while scrolling instead
+    // of reading the DOM only once at the very end.
+    const collectedPosts = new Map();
+    const collectVisiblePosts = async () => {
+      const visiblePosts = await page.evaluate(() => {
+        const results = [];
 
-    const posts = await page.evaluate(() => {
-      const results = [];
+        document.querySelectorAll("div[role='article']").forEach((article) => {
+          const text = article.innerText || "";
+          if (text.length < 40) return;
 
-      document.querySelectorAll("div[role='article']").forEach((article) => {
-        const text = article.innerText || "";
-        if (text.length < 40) return;
+          const link =
+            article.querySelector("a[href*='/posts/']") ||
+            article.querySelector("a[href*='story_fbid']") ||
+            article.querySelector("a[href*='/videos/']") ||
+            article.querySelector("a[href*='/reel/']");
 
-        const link =
-          article.querySelector("a[href*='/posts/']") ||
-          article.querySelector("a[href*='story_fbid']") ||
-          article.querySelector("a[href*='/videos/']");
+          const authorCandidate =
+            article.querySelector("h2 strong") ||
+            article.querySelector("h3 strong") ||
+            article.querySelector("strong span") ||
+            article.querySelector("h2 span") ||
+            article.querySelector("h3 span");
 
-        const authorCandidate =
-          article.querySelector("h2 strong") ||
-          article.querySelector("h3 strong") ||
-          article.querySelector("strong span") ||
-          article.querySelector("h2 span") ||
-          article.querySelector("h3 span");
+          const authorName = authorCandidate?.innerText || "";
+          const timeElement =
+            article.querySelector("time[datetime]") ||
+            article.querySelector("abbr[data-utime]") ||
+            article.querySelector("[data-utime]");
+          const unixTime = timeElement?.getAttribute("data-utime");
+          const publishedAt = unixTime
+            ? new Date(Number(unixTime) * 1000).toISOString()
+            : timeElement?.getAttribute("datetime") || null;
 
-        const authorName = authorCandidate?.innerText || "";
-
-        results.push({
-          message: text.replace(/\s+/g, " ").trim(),
-          authorName: authorName.replace(/\s+/g, " ").trim(),
-          url: link ? link.href : window.location.href,
+          results.push({
+            message: text.replace(/\s+/g, " ").trim(),
+            authorName: authorName.replace(/\s+/g, " ").trim(),
+            url: link ? link.href : window.location.href,
+            publishedAt,
+          });
         });
+
+        return results;
       });
 
-      return results.slice(0, 5);
-    });
+      visiblePosts.forEach((post) => {
+        const hasPostPermalink =
+          /\/(posts|videos|reel)\//i.test(post.url || "") ||
+          /[?&]story_fbid=/i.test(post.url || "");
+        const key = hasPostPermalink
+          ? post.url
+          : `${post.authorName}|${post.publishedAt || ""}|${post.message}`;
+        if (!collectedPosts.has(key)) collectedPosts.set(key, post);
+      });
+    };
+
+    await collectVisiblePosts();
+
+    const maxScrolls =
+      options.period === "year" ? 120 : options.period === "month" ? 45 : 18;
+    const sinceTime = options.since
+      ? new Date(options.since).getTime()
+      : null;
+    let unchangedScrolls = 0;
+    let previousHeight = 0;
+
+    for (let i = 0; i < maxScrolls; i += 1) {
+      await page.evaluate(() => window.scrollBy(0, 2000));
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      await collectVisiblePosts();
+
+      const scrollState = await page.evaluate(() => {
+        const times = Array.from(
+          document.querySelectorAll(
+            "div[role='article'] time[datetime], div[role='article'] [data-utime]"
+          )
+        )
+          .map((element) => {
+            const unixTime = element.getAttribute("data-utime");
+            const value = unixTime
+              ? Number(unixTime) * 1000
+              : Date.parse(element.getAttribute("datetime") || "");
+            return Number.isFinite(value) ? value : null;
+          })
+          .filter((value) => value !== null);
+
+        return {
+          height: document.documentElement.scrollHeight,
+          oldestTime: times.length ? Math.min(...times) : null,
+        };
+      });
+
+      unchangedScrolls =
+        scrollState.height === previousHeight ? unchangedScrolls + 1 : 0;
+      previousHeight = scrollState.height;
+
+      if (
+        (sinceTime && scrollState.oldestTime && scrollState.oldestTime <= sinceTime) ||
+        unchangedScrolls >= 3
+      ) {
+        break;
+      }
+    }
+
+    const posts = Array.from(collectedPosts.values());
 
     console.log("Posts found:", posts.length);
     return posts;
@@ -302,29 +382,51 @@ const scrapeFacebookPosts = async (pageUrl) => {
   }
 };
 
-const scanFacebookItem = async (item) => {
+const scanFacebookItem = async (item, options = {}) => {
   try {
-    const posts = await scrapeFacebookPosts(item.value);
+    const posts = await scrapeFacebookPosts(item.value, options);
+    const since = options.since ? new Date(options.since) : null;
+    const until = options.until ? new Date(options.until) : new Date();
+    const periodPosts = since
+      ? posts.filter((post) => {
+          // Facebook frequently hides the machine-readable timestamp. Keep
+          // those posts so they are not silently lost; postId deduplication
+          // prevents them from being stored again on later scans.
+          if (!post.publishedAt) return true;
+          const publishedAt = new Date(post.publishedAt);
+          return (
+            !Number.isNaN(publishedAt.getTime()) &&
+            publishedAt >= since &&
+            publishedAt <= until
+          );
+        })
+      : posts;
 
-    let scanned = posts.length;
+    let scanned = periodPosts.length;
     let alerts = 0;
 
-    for (const post of posts) {
+    for (const post of periodPosts) {
       const result = await analyzeFacebookPost({ item, post });
       if (result?.alertCreated) alerts += 1;
     }
 
     await BlacklistItem.findByIdAndUpdate(item._id, {
       lastScannedAt: new Date(),
-      lastScanStatus: `scanned ${scanned}, alerts ${alerts}`,
+      lastScanStatus: `scanned ${scanned} (${options.period || "current"}), alerts ${alerts}`,
     });
 
-    return { scanned, alerts };
+    return {
+      scanned,
+      alerts,
+      skippedOutsidePeriod: posts.length - periodPosts.length,
+      period: options.period || null,
+      since,
+      until,
+    };
   } catch (error) {
     console.error("Scan Facebook item error:", error.message);
 
     await BlacklistItem.findByIdAndUpdate(item._id, {
-      lastScannedAt: new Date(),
       lastScanStatus: `error: ${error.message}`,
     });
 
@@ -332,7 +434,8 @@ const scanFacebookItem = async (item) => {
   }
 };
 
-const scanFacebookWatchlist = async () => {
+const scanFacebookWatchlist = async (options = {}) => {
+  const results = [];
   try {
     const items = await BlacklistItem.find({
       type: "facebook_page",
@@ -343,11 +446,25 @@ const scanFacebookWatchlist = async () => {
     console.log("Facebook watchlist items:", items.length);
 
     for (const item of items) {
-      await scanFacebookItem(item);
+      const isAutomaticScan = !options.since;
+      const until = options.until ? new Date(options.until) : new Date();
+      const defaultSince = new Date(
+        until.getTime() - 7 * 24 * 60 * 60 * 1000
+      );
+      const itemOptions = isAutomaticScan
+        ? {
+            period: "automatic",
+            since: item.lastScannedAt || defaultSince,
+            until,
+          }
+        : options;
+
+      results.push(await scanFacebookItem(item, itemOptions));
     }
   } catch (error) {
     console.error("Facebook watchlist error:", error.message);
   }
+  return results;
 };
 
 let isScanning = false;

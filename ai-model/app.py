@@ -1,21 +1,67 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+import hashlib
 import joblib
+import os
 import re
+from functools import wraps
 from pathlib import Path
 
 from preprocessing import preprocess_text
+from somali_language import assert_somali_only
+
+
+def load_env_file(path: Path) -> None:
+    if not path.exists():
+        return
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        os.environ.setdefault(key, value)
+
+
+MODEL_DIR = Path(__file__).resolve().parent
+load_env_file(MODEL_DIR / ".env")
+load_env_file(MODEL_DIR.parent / "backend" / ".env")
 
 app = Flask(__name__)
-CORS(app)
 
-# LOAD MODEL
-MODEL_DIR = Path(__file__).resolve().parent
+ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv("FRONTEND_URL", "http://localhost:5173").split(",")
+    if origin.strip()
+]
+CORS(app, resources={r"/*": {"origins": ALLOWED_ORIGINS or ["http://localhost:5173"]}})
+
+AI_MODEL_API_KEY = (os.getenv("AI_MODEL_API_KEY") or "").strip()
+EXPECTED_MODEL_SHA256 = (os.getenv("AI_MODEL_SHA256") or "").strip().lower()
+
 TRAINING_DIR = MODEL_DIR.parent / "model"
-model = joblib.load(MODEL_DIR / "crime_model.pkl")
-vectorizer = joblib.load(MODEL_DIR / "vectorizer.pkl")
+MODEL_PATH = MODEL_DIR / "crime_model.pkl"
+VECTORIZER_PATH = MODEL_DIR / "vectorizer.pkl"
 
-# MODEL ENRICHMENT: analysis kasta wuxuu soo celinayaa location si backend/dashboard-ku u helaan xog isku mid ah.
+
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+MODEL_SHA256 = file_sha256(MODEL_PATH)
+if EXPECTED_MODEL_SHA256 and MODEL_SHA256 != EXPECTED_MODEL_SHA256:
+    raise RuntimeError(
+        "Model integrity check failed. Update AI_MODEL_SHA256 or restore crime_model.pkl."
+    )
+
+model = joblib.load(MODEL_PATH)
+vectorizer = joblib.load(VECTORIZER_PATH)
+
 SOMALI_LOCATIONS = [
     {"district_or_city": "hodan", "city": "muqdisho", "region": "banaadir"},
     {"district_or_city": "yaaqshiid", "city": "muqdisho", "region": "banaadir"},
@@ -39,6 +85,19 @@ SOMALI_LOCATIONS = [
     {"district_or_city": "hargeysa", "city": "hargeysa", "region": "woqooyi galbeed"},
     {"district_or_city": "boosaaso", "city": "boosaaso", "region": "bari"},
 ]
+
+
+def require_api_key(view):
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        if AI_MODEL_API_KEY:
+            provided = request.headers.get("X-API-Key", "")
+            if provided != AI_MODEL_API_KEY:
+                return jsonify({"message": "Unauthorized"}), 401
+        return view(*args, **kwargs)
+
+    return wrapped
+
 
 def find_locations(text):
     text_lower = text.lower()
@@ -91,7 +150,6 @@ def make_response(text):
     locations = find_locations(text)
     matched_keyword = find_crime_keyword(text)
 
-    # Same preprocessing as training notebook (no train/serve skew)
     processed = preprocess_text(text)
     vector = vectorizer.transform([processed])
     prediction = str(model.predict(vector)[0])
@@ -100,15 +158,13 @@ def make_response(text):
     if hasattr(model, "predict_proba"):
         confidence = round(max(model.predict_proba(vector)[0]) * 100, 2)
     elif hasattr(model, "decision_function"):
-        # Map decision scores to a rough 50-99 confidence band
         score = float(model.decision_function(vector)[0])
         confidence = round(min(99.0, max(50.0, 50.0 + abs(score) * 10.0)), 2)
 
+    # Decision comes from the ML model only.
+    # Keywords are detected afterwards for marking / evidence labels — they do not override.
     model_is_crime = is_crime_prediction(prediction)
-    is_crime = model_is_crime or matched_keyword is not None
-
-    if matched_keyword and not model_is_crime:
-        confidence = max(confidence, 85.0)
+    is_crime = model_is_crime
 
     normalized_prediction = "crime-related" if is_crime else "not crime-related"
 
@@ -121,62 +177,64 @@ def make_response(text):
         "is_crime": is_crime,
         "matchedKeyword": matched_keyword,
         "matched_keyword": matched_keyword,
+        "keywordMarked": matched_keyword is not None,
         "location": locations,
         "locations": locations,
         "model_loaded": True,
-        "decisionSource": "keyword" if matched_keyword and not model_is_crime else "model",
+        "decisionSource": "model",
         "decision": "CRIME" if is_crime else "NOT_CRIME",
     }
 
-# HEALTH CHECK
 
 @app.route("/health", methods=["GET"])
 def health():
     return jsonify({
         "status": "ok",
         "message": "AI Model Running",
-        "modelLoaded": True
+        "modelLoaded": True,
     })
 
 
 @app.route("/api/model/info", methods=["GET"])
+@require_api_key
 def model_info():
     return jsonify({
         "status": "ok",
         "modelLoaded": True,
-        "modelFile": str(MODEL_DIR / "crime_model.pkl"),
-        "vectorizerFile": str(MODEL_DIR / "vectorizer.pkl"),
-        "trainingNotebook": str(TRAINING_DIR / "Automatic_crime.ipynb"),
-        "trainingDataset": str(TRAINING_DIR / "dataset.csv.csv"),
         "features": ["text", "url", "file", "batch"],
         "predictEndpoint": "/predict",
-        "preprocessing": "ai-model/preprocessing.py",
+        "modelIntegrity": MODEL_SHA256[:12],
     })
 
-# PREDICT
 
 @app.route("/predict", methods=["POST"])
+@require_api_key
 def predict():
-
     data = request.get_json(silent=True) or {}
-
     text = data.get("text", "")
 
     if not text or not text.strip():
+        return jsonify({"message": "Qoraalka waa loo baahan yahay."}), 400
+
+    language_check = assert_somali_only(text)
+    if not language_check.get("ok"):
         return jsonify({
-            "message": "Text is required"
+            "message": language_check.get("message"),
+            "languageRejected": True,
+            "reason": language_check.get("reason"),
         }), 400
 
     return jsonify(make_response(text))
 
 
 @app.route("/api/classify/text", methods=["POST"])
+@require_api_key
 def classify_text():
     return predict()
 
+
 if __name__ == "__main__":
-    app.run(
-        host="0.0.0.0",
-        port=5001,
-        debug=True
-    )
+    host = os.getenv("AI_MODEL_HOST", "127.0.0.1")
+    port = int(os.getenv("AI_MODEL_PORT", "5001"))
+    debug = os.getenv("AI_MODEL_DEBUG", "false").lower() == "true"
+    app.run(host=host, port=port, debug=debug)

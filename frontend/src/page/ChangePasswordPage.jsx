@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
-import API from "../api.js";
+import API, { getStoredToken } from "../api.js";
 import { applyTheme } from "../theme.js";
 import {
   AuthPage,
@@ -16,12 +16,15 @@ import {
 const homeByRole = {
   admin: "/dashboard",
   investigator: "/cases",
-  user: "/analysis",
+  dataset_manager: "/dataset",
+  user: "/dashboard",
 };
 
 function getStoredUser() {
   try {
-    return JSON.parse(localStorage.getItem("user") || "null");
+    return JSON.parse(
+      sessionStorage.getItem("user") || localStorage.getItem("user") || "null"
+    );
   } catch {
     return null;
   }
@@ -32,7 +35,7 @@ export default function ChangePasswordPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const token = searchParams.get("token");
-  const storedToken = localStorage.getItem("token");
+  const storedToken = getStoredToken();
   const storedUser = getStoredUser();
   const isFirstLoginMode = !token && Boolean(storedToken && storedUser?.isPasswordChangeRequired);
   const canChangePassword = Boolean(token || isFirstLoginMode);
@@ -97,7 +100,7 @@ export default function ChangePasswordPage() {
     applyTheme(updatedUser.theme, { updateUser: true, emit: false });
     setStatus("success");
     setMessage("Password saved. Opening your workspace...");
-    setTimeout(() => navigate(homeByRole[updatedUser.role] || "/analysis", { replace: true }), 1200);
+    setTimeout(() => navigate(homeByRole[updatedUser.role] || "/dashboard", { replace: true }), 1200);
   };
 
   const handleTokenPasswordChange = async () => {

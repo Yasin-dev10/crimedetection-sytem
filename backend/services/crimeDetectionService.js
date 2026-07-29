@@ -4,6 +4,7 @@ const Notification = require("../model/Notification");
 const User = require("../model/user");
 const BlacklistAlert = require("../model/BlacklistAlert");
 const { sendEmailAlert } = require("./emailService");
+const { escapeHtml } = require("../utils/htmlEscape");
 
 const CASE_CATEGORIES = [
   "murder",
@@ -159,13 +160,17 @@ const dispatchCrimeDetection = async ({ history }) => {
           sendEmailAlert({
             to: admin.email,
             subject: "BAREAI — Crime Detected",
-            message: `
+            message: `Crime detected by AI.
+Category: ${category}
+Status: Waiting for the first investigator to open and claim the case.
+Preview: ${contentPreview}`,
+            html: `
               <h2>Crime Detected by AI</h2>
               <p>A new crime-related analysis result was broadcast to all investigators.</p>
-              <p><b>Category:</b> ${category}</p>
+              <p><b>Category:</b> ${escapeHtml(category)}</p>
               <p><b>Status:</b> Waiting for the first investigator to open and claim the case.</p>
               <p><b>Preview:</b></p>
-              <p>${contentPreview}</p>
+              <p>${escapeHtml(contentPreview)}</p>
             `,
           }).catch((err) =>
             console.error("ADMIN CRIME EMAIL ERROR:", err.message)
@@ -195,12 +200,15 @@ const dispatchCrimeDetection = async ({ history }) => {
           sendEmailAlert({
             to: officer.email,
             subject: "BAREAI — New Crime Case Available",
-            message: `
+            message: `New crime case available.
+AI detected crime-related content. Open the case in Case Management to claim it.
+Preview: ${contentPreview}`,
+            html: `
               <h2>New Crime Case Available</h2>
               <p>AI detected crime-related content. Open the case in Case Management to claim it.</p>
               <p><b>Rule:</b> The first investigator to open the case becomes the assigned officer. Others are removed automatically.</p>
               <p><b>Preview:</b></p>
-              <p>${contentPreview}</p>
+              <p>${escapeHtml(contentPreview)}</p>
             `,
           }).catch((err) =>
             console.error("INVESTIGATOR CRIME EMAIL ERROR:", err.message)

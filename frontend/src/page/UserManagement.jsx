@@ -24,6 +24,7 @@ import {
   X,
 } from 'lucide-react';
 import API from '../api';
+import { API_BASE_URL } from '../api';
 
 const getUserId = (user) => {
   const rawId = user?._id || user?.id;
@@ -44,6 +45,7 @@ function RoleBadge({ role }) {
   const styles = {
     admin: { bg: 'rgba(139, 92, 246, 0.12)', color: '#a78bfa', border: 'rgba(139, 92, 246, 0.3)' },
     investigator: { bg: 'rgba(59, 130, 246, 0.12)', color: '#60a5fa', border: 'rgba(59, 130, 246, 0.3)' },
+    dataset_manager: { bg: 'rgba(16, 185, 129, 0.12)', color: '#34d399', border: 'rgba(16, 185, 129, 0.3)' },
     user: { bg: 'rgba(100, 116, 139, 0.12)', color: '#94a3b8', border: 'rgba(100, 116, 139, 0.3)' },
   };
   const s = styles[role] || styles.user;
@@ -150,7 +152,9 @@ function UserDetailsView({
       ? 'Administrator'
       : user.role === 'investigator'
         ? 'Investigator'
-        : 'User';
+        : user.role === 'dataset_manager'
+          ? 'Dataset Manager'
+          : 'User';
 
   const metricCards = [
     {
@@ -581,6 +585,7 @@ export default function UserManagement() {
         roleTab === 'all' ||
         (roleTab === 'admin' && u.role === 'admin') ||
         (roleTab === 'investigator' && u.role === 'investigator') ||
+        (roleTab === 'dataset_manager' && u.role === 'dataset_manager') ||
         (roleTab === 'user' && u.role === 'user');
       if (!roleOk) return false;
       if (!q) return true;
@@ -609,7 +614,7 @@ export default function UserManagement() {
   const getImageUrl = (image) => {
     if (!image) return defaultImage;
     if (image.startsWith('http')) return image;
-    return `http://localhost:5000${image}`;
+    return `${API_BASE_URL}${image}`;
   };
 
   const formatJoinedDate = (date) => {
@@ -897,6 +902,7 @@ export default function UserManagement() {
     { id: 'all', label: 'All Users' },
     { id: 'admin', label: 'Administrators' },
     { id: 'investigator', label: 'Investigators' },
+    { id: 'dataset_manager', label: 'Dataset Managers' },
     { id: 'user', label: 'Users' },
   ];
 
@@ -1428,7 +1434,7 @@ function UserFormModal({
   const previewSrc = form.profileImage
     ? URL.createObjectURL(form.profileImage)
     : currentImage
-    ? (currentImage.startsWith('http') ? currentImage : `http://localhost:5000${currentImage}`)
+    ? (currentImage.startsWith('http') ? currentImage : `${API_BASE_URL}${currentImage}`)
     : defaultImage;
 
   const handleInlineOtpChange = (value) => {

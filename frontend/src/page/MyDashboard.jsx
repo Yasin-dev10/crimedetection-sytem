@@ -20,8 +20,11 @@ import {
 } from "lucide-react";
 import { getMyHistory, exportDataset } from "../services";
 
-export default function MyDashboard() {
-  const user = JSON.parse(localStorage.getItem("user") || "null");
+export default function MyDashboard({ pageMode = "dashboard" }) {
+  const isHistoryPage = pageMode === "history";
+  const user = JSON.parse(
+    sessionStorage.getItem("user") || localStorage.getItem("user") || "null"
+  );
 
   const [data, setData]     = useState({ stats: { total: 0, crime: 0, notCrime: 0 }, records: [], totalPages: 1, page: 1 });
   const [page, setPage]     = useState(1);
@@ -113,7 +116,7 @@ export default function MyDashboard() {
               </div>
               <div>
                 <h1 className="page-title text-2xl">
-                  My Dashboard
+                  {isHistoryPage ? "History" : "Dashboard"}
                 </h1>
                 <p className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>
                   {user?.name || "User"} •{" "}
@@ -122,11 +125,15 @@ export default function MyDashboard() {
               </div>
             </div>
             <p className="text-slate-400 text-sm mt-2 ml-13">
-              Your personal analysis data and results.
+              {isHistoryPage
+                ? "Dhammaan analysis-yadaadii hore iyo natiijooyinkooda."
+                : "Tirakoobkaaga shaqsiga ah iyo natiijooyinka analysis-ka."}
             </p>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            {user?.role === "dataset_manager" && (
+              <>
             <button
               onClick={() => downloadDataset("xlsx")}
               disabled={exporting || loading}
@@ -150,6 +157,8 @@ export default function MyDashboard() {
               <Download size={15} />
               CSV
             </button>
+              </>
+            )}
             <button
               onClick={() => fetchData(page)}
               disabled={loading}

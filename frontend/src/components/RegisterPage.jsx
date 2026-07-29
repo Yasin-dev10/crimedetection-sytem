@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import Swal from "sweetalert2";
-import API from "../api";
+import API, { storeSession } from "../api";
 import { applyTheme } from "../theme";
 import {
   AuthPage,
@@ -56,10 +56,9 @@ export default function RegisterPage() {
   };
 
   const completeLogin = (user, token) => {
-    localStorage.setItem("token", token);
-    localStorage.setItem("user", JSON.stringify(user));
+    storeSession({ token, user });
     applyTheme(user.theme, { updateUser: true, emit: false });
-    window.location.href = "/analysis";
+    window.location.href = "/dashboard";
   };
 
   const handleSubmit = async (e) => {

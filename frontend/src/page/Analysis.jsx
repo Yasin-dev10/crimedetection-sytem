@@ -14,6 +14,8 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import API from "../api";
 import { getStoredUser } from "../theme";
 import { renderCrimeHighlightedText } from "../utils/crimeHighlight";
+import { assertSomaliOnly, SOMALI_ONLY_MESSAGE } from "../utils/somaliLanguage";
+import { sanitizeDecisionText } from "../utils/sanitizeDecisionText";
 import { exportDataset } from "../services";
 
 export default function Analysis({ publicMode = false, embedded = false }) {
@@ -145,16 +147,36 @@ export default function Analysis({ publicMode = false, embedded = false }) {
       if (getGuestUsage() >= GUEST_FREE_LIMIT) {
         setNeedsAccount(true);
         setError(
-          "You have used your 2 free analyses. Create a free account to continue."
+          "Waxaad isticmaashay 2 analysis ee bilaashka ah. Samee akoon si aad u sii waddo."
         );
         return;
       }
 
       if (type === "text" && text.length > GUEST_MAX_TEXT_LENGTH) {
         setError(
-          `Guest text is limited to ${GUEST_MAX_TEXT_LENGTH} characters (yours is ${text.length}). Create a free account for unlimited analysis.`
+          `Martiga waxaa loo xadiday ${GUEST_MAX_TEXT_LENGTH} xaraf (adhigaagu waa ${text.length}). Samee akoon si aad u hesho analysis xadidan.`
         );
         setNeedsAccount(true);
+        return;
+      }
+    }
+
+    if (type === "text") {
+      const languageCheck = assertSomaliOnly(text);
+      if (!languageCheck.ok) {
+        setError(languageCheck.message || SOMALI_ONLY_MESSAGE);
+        return;
+      }
+    }
+
+    if (type === "batch" && batchType === "text") {
+      const items = batchInput
+        .split("\n")
+        .map((item) => item.trim())
+        .filter(Boolean);
+      const rejected = items.find((item) => !assertSomaliOnly(item).ok);
+      if (rejected) {
+        setError(SOMALI_ONLY_MESSAGE);
         return;
       }
     }
@@ -165,25 +187,19 @@ export default function Analysis({ publicMode = false, embedded = false }) {
     try {
       let res;
 
-      // BACKEND CONNECTION: Text Analysis -> POST /api/analysis/text
       if (type === "text") {
         res = await API.post("/analysis/text", { text });
-
         setResult(buildAnalysisResult(res.data, "text", text));
       }
 
-      // BACKEND CONNECTION: URL Analysis -> POST /api/analysis/url
       if (type === "url") {
         res = await API.post("/analysis/url", { url });
-
         setResult(buildAnalysisResult(res.data, "url", url));
       }
 
-      // BACKEND CONNECTION: File Analysis -> POST /api/analysis/file
-      // FormData is used for file upload
       if (type === "file") {
         if (!file) {
-          setError("Please select a file first");
+          setError("Fadlan marka hore dooro fayl");
           setLoading(false);
           return;
         }
@@ -200,8 +216,6 @@ export default function Analysis({ publicMode = false, embedded = false }) {
         setResult(buildAnalysisResult(res.data, "file", file.name));
       }
 
-      // BACKEND CONNECTION: Batch Analysis -> POST /api/analysis/batch
-      // batchType = text or url, items = lines split from the textarea
       if (type === "batch") {
         const items = batchInput
           .split("\n")
@@ -209,7 +223,7 @@ export default function Analysis({ publicMode = false, embedded = false }) {
           .filter(Boolean);
 
         if (items.length === 0) {
-          setError("Please enter at least one item");
+          setError("Fadlan geli ugu yaraan hal qoraal ama URL");
           setLoading(false);
           return;
         }
@@ -220,6 +234,12 @@ export default function Analysis({ publicMode = false, embedded = false }) {
         });
 
         setBatchResults(res.data.results || []);
+        const failedLanguage = (res.data.results || []).find(
+          (item) => item.languageRejected || item.success === false
+        );
+        if (failedLanguage?.message) {
+          setError(failedLanguage.message);
+        }
       }
 
       if (isGuest) incrementGuestUsage(type === "batch" ? 2 : 1);
@@ -228,16 +248,16 @@ export default function Analysis({ publicMode = false, embedded = false }) {
         setGuestUsage(GUEST_FREE_LIMIT);
         setNeedsAccount(true);
       }
-      setError(err.response?.data?.message || "Analysis failed");
+      setError(err.response?.data?.message || "Analysis wuu fashilmay");
     } finally {
       setLoading(false);
     }
   };
 
   const tabs = [
-    { key: "text", label: "Text", icon: FileText },
+    { key: "text", label: "Qoraal", icon: FileText },
     { key: "url", label: "URL", icon: LinkIcon },
-    { key: "file", label: "File", icon: Upload },
+    { key: "file", label: "Fayl", icon: Upload },
     { key: "batch", label: "Batch", icon: Layers },
   ];
 
@@ -267,14 +287,14 @@ export default function Analysis({ publicMode = false, embedded = false }) {
       {!embedded && (
         <div className="page-header">
           <div>
-            <h1 className="page-title">Crime Content Analysis</h1>
+            <h1 className="page-title">Falanqaynta Qoraalka Dambiga</h1>
             <p className="page-subtitle">
               {publicMode
-                ? "Use AI analysis without entering the investigation workspace. Analyze text, URLs, files, or batch inputs."
-                : "Analyze text, URLs, files, or batch inputs for crime-related content."}
+                ? "Geli qoraal Af Soomaali ah oo keliya. Ingiriis iyo luqadaha kale waa la diidaa."
+                : "Geli qoraal, URL, fayl, ama batch — Af Soomaali oo keliya ayaa la aqbalayaa."}
             </p>
           </div>
-          {!isGuest && (
+          {user?.role === "dataset_manager" && (
             <button
               type="button"
               onClick={downloadDatasetExcel}
@@ -344,7 +364,7 @@ export default function Analysis({ publicMode = false, embedded = false }) {
                 onChange={(e) => setText(e.target.value)}
                 required
                 rows="8"
-                placeholder="Enter text to analyze for crime-related content..."
+                placeholder="Geli qoraal Af Soomaali ah oo keliya (Ingiriis lama aqbalo)..."
                 className="w-full p-4 rounded-2xl border placeholder:opacity-50 focus:outline-none focus:ring-2 focus:ring-[var(--brand-ring)]"
                 style={fieldStyle}
               />
@@ -355,7 +375,7 @@ export default function Analysis({ publicMode = false, embedded = false }) {
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
                 required
-                placeholder="Paste article / website URL..."
+                placeholder="Geli URL bog Af Soomaali ah..."
                 className="w-full p-4 rounded-2xl border placeholder:opacity-50 focus:outline-none focus:ring-2 focus:ring-[var(--brand-ring)]"
                 style={fieldStyle}
               />
@@ -371,10 +391,10 @@ export default function Analysis({ publicMode = false, embedded = false }) {
               >
                 <Upload className="mb-3 brand-text" size={34} />
                 <h3 className="font-bold" style={{ color: "var(--text-primary)" }}>
-                  Upload File
+                  Soo geli fayl
                 </h3>
                 <p className="text-sm mb-4" style={{ color: "var(--text-muted)" }}>
-                  Supported files: PDF, DOC, DOCX, TXT, CSV, JSON, HTML, MD, RTF, XLSX
+                  Qoraalka gudaha waa inuu ahaadaa Af Soomaali. Faylasha: PDF, DOC, DOCX, TXT, CSV, JSON, HTML, MD, RTF, XLSX
                 </p>
 
                 <input
@@ -402,7 +422,7 @@ export default function Analysis({ publicMode = false, embedded = false }) {
                     className="px-4 py-2 rounded-xl font-semibold border transition-colors"
                     style={tabStyle(batchType === "text")}
                   >
-                    Batch Text
+                    Qoraal Batch
                   </button>
 
                   <button
@@ -411,7 +431,7 @@ export default function Analysis({ publicMode = false, embedded = false }) {
                     className="px-4 py-2 rounded-xl font-semibold border transition-colors"
                     style={tabStyle(batchType === "url")}
                   >
-                    Batch URL
+                    URL Batch
                   </button>
                 </div>
 
@@ -422,8 +442,8 @@ export default function Analysis({ publicMode = false, embedded = false }) {
                   rows="8"
                   placeholder={
                     batchType === "text"
-                      ? "Enter multiple texts, one per line..."
-                      : "Enter multiple URLs, one per line..."
+                      ? "Geli qoraallo Af Soomaali ah, mid saddexaadkiiba..."
+                      : "Geli URLs (bogag Af Soomaali), mid saddexaadkiiba..."
                   }
                   className="w-full p-4 rounded-2xl border placeholder:opacity-50 focus:outline-none focus:ring-2 focus:ring-[var(--brand-ring)]"
                   style={fieldStyle}
@@ -441,7 +461,7 @@ export default function Analysis({ publicMode = false, embedded = false }) {
                     style={{ backgroundColor: "var(--brand)" }}
                   >
                     <LogIn size={16} />
-                    Create a free account
+                    Samee akoon bilaash ah
                   </Link>
                 )}
               </div>
@@ -449,11 +469,16 @@ export default function Analysis({ publicMode = false, embedded = false }) {
 
             {isGuest && !needsAccount && (
               <p className="mt-3 text-xs" style={{ color: "var(--text-muted)" }}>
-                Free trial: {Math.max(0, GUEST_FREE_LIMIT - getGuestUsage())} of{" "}
-                {GUEST_FREE_LIMIT} free analyses left. Text is limited to{" "}
-                {GUEST_MAX_TEXT_LENGTH} characters for guests.
+                Tijaabo bilaash: {Math.max(0, GUEST_FREE_LIMIT - getGuestUsage())} /{" "}
+                {GUEST_FREE_LIMIT} analysis ayaa kuu hadhay. Qoraalka martiga waa ugu
+                badnaan {GUEST_MAX_TEXT_LENGTH} xaraf. Luqad: Af Soomaali oo keliya.
               </p>
             )}
+
+            <p className="mt-3 text-xs font-medium" style={{ color: "var(--brand)" }}>
+              Xeer: Qoraalka waa inuu ahaadaa Af Soomaali. Ingiriis iyo luqadaha kale
+              lama aqbalo.
+            </p>
 
             <button
               type="submit"
@@ -463,10 +488,10 @@ export default function Analysis({ publicMode = false, embedded = false }) {
               {loading ? (
                 <>
                   <Loader2 className="animate-spin" size={18} />
-                  Analyzing...
+                  Waa la falanqeeyaa...
                 </>
               ) : (
-                loadedFromHistory ? "Re-analyze Content" : "Analyze"
+                loadedFromHistory ? "Dib u falanqee" : "Falanqee"
               )}
             </button>
           </form>
@@ -506,11 +531,11 @@ export default function Analysis({ publicMode = false, embedded = false }) {
                 {canOpenHistory ? (
                   <button
                     type="button"
-                    onClick={() => navigate("/reports")}
+                    onClick={() => navigate("/history")}
                     className="btn-secondary justify-center"
                   >
                     <History size={16} />
-                    View Reports
+                    View History
                   </button>
                 ) : (
                   <Link
@@ -703,10 +728,10 @@ function formatDecision(result) {
 
 function getDisplayText({ type, input, extractedText }) {
   if (type === "url" || type === "file" || type === "batch") {
-    return extractedText || input || "";
+    return sanitizeDecisionText(extractedText || input || "");
   }
 
-  return input || extractedText || "";
+  return sanitizeDecisionText(input || extractedText || "");
 }
 
 function getHistoryInitialState(historyItem) {

@@ -1,18 +1,46 @@
 import axios from "axios";
 
+const API_ORIGIN = (import.meta.env.VITE_API_URL || "http://localhost:5000").replace(
+  /\/$/,
+  ""
+);
+
 const API = axios.create({
-  baseURL: "http://localhost:5000/api",
+  baseURL: `${API_ORIGIN}/api`,
+  withCredentials: true,
 });
+
+export const API_BASE_URL = API_ORIGIN;
 
 let isRedirectingToLogin = false;
 
+const TOKEN_KEY = "token";
+const USER_KEY = "user";
+
+export function getStoredToken() {
+  return sessionStorage.getItem(TOKEN_KEY) || localStorage.getItem(TOKEN_KEY);
+}
+
 export function clearStoredSession() {
-  localStorage.removeItem("token");
-  localStorage.removeItem("user");
+  sessionStorage.removeItem(TOKEN_KEY);
+  sessionStorage.removeItem(USER_KEY);
+  localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(USER_KEY);
+}
+
+export function storeSession({ token, user }) {
+  if (token) {
+    sessionStorage.setItem(TOKEN_KEY, token);
+    localStorage.removeItem(TOKEN_KEY);
+  }
+  if (user) {
+    sessionStorage.setItem(USER_KEY, JSON.stringify(user));
+    localStorage.setItem(USER_KEY, JSON.stringify(user));
+  }
 }
 
 API.interceptors.request.use((config) => {
-  const token = localStorage.getItem("token");
+  const token = getStoredToken();
 
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
@@ -36,7 +64,6 @@ API.interceptors.response.use(
       const isPublicAnalysisSurface =
         path === "/" || path === "/analysis" || path.startsWith("/analysis/");
 
-      // Keep guests on the public analysis landing flow instead of forcing login.
       if (isPublicAnalysisSurface) {
         return Promise.reject(error);
       }

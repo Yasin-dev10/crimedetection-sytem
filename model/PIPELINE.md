@@ -94,6 +94,7 @@ Qaar ayaa laga soo qaatay **model sax.ipynb**:
 | Fayl | Ujeeddo | Source |
 |------|---------|--------|
 | `00_duplicates.png` | Duplicate vs unique | model sax |
+| `00a_dataset_sources.png` | Website-yada laga keenay dataset-ka iyo tirada il kasta | dataset URL |
 | `01_category_balance.png` | Saamiga / tirada categories | pipeline |
 | `02_text_length_comparison.png` | Length + crime vs not-crime averages | sax + pipeline |
 | `03_top_words_by_class.png` | Top words labada class | sax + pipeline |

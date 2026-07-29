@@ -2,7 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-route
 import { useRef, useState } from "react";
 import { useEffect } from "react";
 import { getInitialTheme } from "./theme";
-import API, { clearStoredSession } from "./api";
+import API, { clearStoredSession, getStoredToken } from "./api";
 import Sidebar from "./components/Sidebar";
 import TopBar from "./components/TopBar";
 
@@ -11,7 +11,9 @@ import RegisterPage from "./components/RegisterPage";
 import ForgotPasswordPage from "./components/ForgotPasswordPage";
 
 import Dashboard from "./page/Dashboard";
+import MyDashboard from "./page/MyDashboard";
 import PublicAnalysis from "./page/PublicAnalysis";
+import Analysis from "./page/Analysis";
 import UserManagement from "./page/UserManagement";
 import ProfilePage from "./page/ProfilePage";
 import SettingsPage from "./page/Setting";
@@ -25,18 +27,36 @@ import VerifyEmailPage from "./page/VerifyEmailPage";
 import ChangePasswordPage from "./page/ChangePasswordPage";
 import Reports from "./page/Reports";
 import AuditLogs from "./page/AuditLogs";
+import DatasetManager from "./page/DatasetManager";
 
 const homeByRole = {
   admin: "/dashboard",
   investigator: "/cases",
-  user: "/analysis",
+  dataset_manager: "/dataset",
+  user: "/dashboard",
 };
+
+function RoleDashboard() {
+  const { user } = getStoredSession();
+  if (user?.role === "admin") return <Dashboard />;
+  return <MyDashboard pageMode="dashboard" />;
+}
+
+function PublicOrRedirectAnalysis() {
+  const { token, user } = getStoredSession();
+  if (token && user?.role === "user") {
+    return <Navigate to="/workspace/analysis" replace />;
+  }
+  return <PublicAnalysis />;
+}
 
 function getStoredSession() {
   try {
+    const rawUser =
+      sessionStorage.getItem("user") || localStorage.getItem("user") || "null";
     return {
-      token: localStorage.getItem("token"),
-      user: JSON.parse(localStorage.getItem("user") || "null"),
+      token: getStoredToken(),
+      user: JSON.parse(rawUser),
     };
   } catch {
     clearStoredSession();
@@ -139,7 +159,7 @@ function Protected({ children, roles }) {
   if (roles && !roles.includes(activeUser?.role)) {
     return (
       <Navigate
-        to={homeByRole[activeUser?.role] || "/analysis"}
+        to={homeByRole[activeUser?.role] || "/dashboard"}
         replace
       />
     );
@@ -198,33 +218,50 @@ export default function App() {
 
         {/* Public */}
         <Route path="/" element={<BareAIApp />} />
-        <Route path="/analysis" element={<PublicAnalysis />} />
+        <Route path="/analysis" element={<PublicOrRedirectAnalysis />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
         <Route path="/forgot-password" element={<ForgotPasswordPage />} />
 
-        {/* My Dashboard – all roles
-        <Route
-          path="/my-dashboard"
-          element={
-            <Protected roles={["admin", "investigator", "user"]}>
-              <MyDashboard />
-            </Protected>
-          }
-        /> */}
-
-        {/* Dashboard */}
+        {/* Dashboard — admin system dashboard, user personal dashboard */}
         <Route
           path="/dashboard"
           element={
-            <Protected roles={["admin"]}>
-              <Dashboard />
+            <Protected roles={["admin", "user"]}>
+              <RoleDashboard />
             </Protected>
           }
         />
 
-        {/* History merged into Reports */}
-        <Route path="/history" element={<Navigate to="/reports" replace />} />
+        {/* Logged-in citizen analysis (with sidebar) */}
+        <Route
+          path="/workspace/analysis"
+          element={
+            <Protected roles={["user"]}>
+              <Analysis embedded />
+            </Protected>
+          }
+        />
+
+        {/* User analysis history */}
+        <Route
+          path="/history"
+          element={
+            <Protected roles={["user"]}>
+              <MyDashboard pageMode="history" />
+            </Protected>
+          }
+        />
+
+        {/* Users */}
+        <Route
+          path="/dataset"
+          element={
+            <Protected roles={["dataset_manager"]}>
+              <DatasetManager />
+            </Protected>
+          }
+        />
 
         {/* Users */}
         <Route
@@ -304,7 +341,7 @@ export default function App() {
         <Route
           path="/profile"
           element={
-            <Protected roles={["admin", "investigator", "user"]}>
+            <Protected roles={["admin", "investigator", "dataset_manager", "user"]}>
               <ProfilePage />
             </Protected>
           }
@@ -314,7 +351,7 @@ export default function App() {
         <Route
           path="/settings"
           element={
-            <Protected roles={["admin", "investigator"]}>
+            <Protected roles={["admin", "investigator", "dataset_manager", "user"]}>
               <SettingsPage />
             </Protected>
           }

@@ -553,6 +553,27 @@ const updateCase = async (req, res) => {
       return res.status(404).json({ message: "Case not found" });
     }
 
+    const caseIsClosed =
+      isResolvedStatus(existingCase.status) ||
+      existingCase.status === "archived" ||
+      existingCase.archived === true;
+
+    // Closed/resolved cases: no reassignment, no reopen — investigator decision is final
+    if (caseIsClosed) {
+      if (assignedOfficer !== undefined) {
+        return res.status(400).json({
+          message:
+            "This case is closed. It cannot be reassigned to another investigator.",
+        });
+      }
+
+      if (status !== undefined || typeof isCrime === "boolean") {
+        return res.status(400).json({
+          message: "This case is already resolved and closed.",
+        });
+      }
+    }
+
     if (req.user.role === "investigator") {
       if (!existingCase.assignedOfficer) {
         return res.status(403).json({
@@ -653,6 +674,10 @@ const updateCase = async (req, res) => {
       await History.findByIdAndUpdate(existingCase.history._id || existingCase.history, {
         investigationStatus: "under_review",
       });
+    } else if (isFlagStatus(updates.status)) {
+      await History.findByIdAndUpdate(existingCase.history._id || existingCase.history, {
+        investigationStatus: updates.status,
+      });
     }
 
     const oldOfficerId = existingCase.assignedOfficer?.toString();
@@ -666,8 +691,10 @@ const updateCase = async (req, res) => {
     if (willBeResolved && !wasResolved) {
       updates.resolvedAt = new Date();
       updates.resolvedBy = req.user._id;
+      // Auto-close: lock the case so it cannot be claimed or reassigned
+      updates.archived = true;
     } else if (wasResolved && ["pending", "investigating"].includes(updates.status)) {
-      // Genuine reopen — clear resolution markers (archiving keeps them)
+      // Genuine reopen — clear resolution markers (blocked when caseIsClosed)
       updates.resolvedAt = null;
       updates.resolvedBy = null;
     }

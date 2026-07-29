@@ -40,7 +40,9 @@ const ACCENT = {
 };
 
 export default function Dashboard() {
-  const user = JSON.parse(localStorage.getItem("user") || "null");
+  const user = JSON.parse(
+    sessionStorage.getItem("user") || localStorage.getItem("user") || "null"
+  );
 
   const [dashboard, setDashboard] = useState({
     stats: {

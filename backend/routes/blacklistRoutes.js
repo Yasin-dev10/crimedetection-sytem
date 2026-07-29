@@ -14,6 +14,7 @@ const {
   scanWebsiteBlacklist,
   scanSingleWebsiteBlacklist,
   getWebsitePages,
+  getWebsitePageById,
   getFakeCrimeSubjects,
   getReportFlags,
   getBlacklistStats,
@@ -52,6 +53,13 @@ router.get(
   protect,
   investigatorOrAdmin,
   getWebsitePages
+);
+
+router.get(
+  "/website/:id/pages/:pageId",
+  protect,
+  investigatorOrAdmin,
+  getWebsitePageById
 );
 
 router.get(

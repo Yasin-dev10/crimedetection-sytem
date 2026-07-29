@@ -986,6 +986,13 @@ function CaseRow({
     item.status !== "not_crime" &&
     !FLAG_STATUSES.has(item.status) &&
     item.status !== "archived";
+  const isCaseClosed =
+    item.status === "crime_case" ||
+    item.status === "not_crime" ||
+    FLAG_STATUSES.has(item.status) ||
+    item.status === "resolved" ||
+    item.status === "archived" ||
+    item.archived === true;
   const badge = statusStyles[item.status] || statusStyles.pending;
 
   return (
@@ -1058,7 +1065,7 @@ function CaseRow({
           backgroundColor: "var(--bg-surface)",
         }}
       >
-        {isAdmin && (
+        {isAdmin && !isCaseClosed && (
           <CaseActionButton
             icon={UserPlus}
             label="Assign"
@@ -1410,7 +1417,7 @@ function CaseDetails({
               <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-slate-500">
                 Assignment
               </p>
-              {isAdmin ? (
+              {isAdmin && !isCaseResolved && item.status !== "archived" ? (
                 <OfficerAssignmentPanel
                   officers={officers}
                   selectedOfficerId={pendingOfficerId}
@@ -1419,11 +1426,18 @@ function CaseDetails({
                   onSave={handleSave}
                 />
               ) : (
-                <div className="mt-1 flex items-center gap-2 text-sm font-semibold text-slate-200">
-                  <User size={14} className="text-slate-400" />
-                  {item.assignedOfficer
-                    ? `Det. ${item.assignedOfficer.name}`
-                    : "Not Assigned"}
+                <div className="mt-1 space-y-1">
+                  <div className="flex items-center gap-2 text-sm font-semibold text-slate-200">
+                    <User size={14} className="text-slate-400" />
+                    {item.assignedOfficer
+                      ? `Det. ${item.assignedOfficer.name}`
+                      : "Not Assigned"}
+                  </div>
+                  {(isCaseResolved || item.status === "archived") && (
+                    <p className="text-xs text-slate-500">
+                      Case closed — cannot be reassigned.
+                    </p>
+                  )}
                 </div>
               )}
             </div>

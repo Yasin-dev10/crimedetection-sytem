@@ -10,7 +10,7 @@ const userSchema = new mongoose.Schema(
 
     role: {
       type: String,
-      enum: ["admin", "investigator", "user"],
+      enum: ["admin", "investigator", "dataset_manager", "user"],
       default: "user",
     },
 
@@ -152,6 +152,12 @@ const userSchema = new mongoose.Schema(
 
     passwordChangeTokenExpiry: {
       type: Date,
+      default: null,
+    },
+
+    /** Current login session id — must match JWT sessionId or the token is rejected */
+    activeSessionId: {
+      type: String,
       default: null,
     },
 

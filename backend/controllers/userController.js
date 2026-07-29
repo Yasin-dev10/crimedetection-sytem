@@ -10,11 +10,12 @@ const {
   sendOTPWithPasswordEmail,
 } = require("../services/emailService");
 const { logActivity } = require("../utils/activityLogger");
+const { SENSITIVE_USER_FIELDS } = require("../utils/userSelect");
 
 const getUsers = async (req, res) => {
   try {
     const users = await User.find()
-      .select("-password")
+      .select(SENSITIVE_USER_FIELDS)
       .populate("flagged_by", "name email role")
       .sort({ createdAt: -1 })
       .lean();
@@ -87,6 +88,7 @@ const createInvestigator = async (req, res) => {
         const hashedPassword = await bcrypt.hash(newPassword, 10);
 
         exists.name = name;
+        exists.role = "investigator";
         exists.badgeNumber = badgeNumber;
         exists.station = station;
         exists.phone = phone;
@@ -432,7 +434,7 @@ const updateAccountStatus = async (req, res) => {
       return res.status(404).json({ message: "User not found" });
     }
 
-    if (["admin", "investigator"].includes(user.role)) {
+    if (["admin", "investigator", "dataset_manager"].includes(user.role)) {
       return res.status(400).json({
         message: "Cannot apply false-report sanctions to staff accounts",
       });
@@ -469,7 +471,7 @@ const updateAccountStatus = async (req, res) => {
     });
 
     const safeUser = await User.findById(user._id)
-      .select("-password")
+      .select(SENSITIVE_USER_FIELDS)
       .populate("flagged_by", "name email role");
 
     res.json({

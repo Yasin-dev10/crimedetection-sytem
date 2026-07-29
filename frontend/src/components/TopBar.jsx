@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Bell, Moon, Sun, Shield } from "lucide-react";
-import API from "../api";
+import API, { getStoredToken } from "../api";
 import { applyTheme, getInitialTheme, getStoredUser } from "../theme";
 import NotificationPanel from "./NotificationPanel";
 import MenuToggle from "./MenuToggle";
@@ -9,7 +9,7 @@ import MenuToggle from "./MenuToggle";
 const homeByRole = {
   admin: "/dashboard",
   investigator: "/cases",
-  user: "/analysis",
+  user: "/dashboard",
 };
 
 export default function TopBar({ sidebarOpen = false, onToggleSidebar }) {
@@ -50,7 +50,7 @@ export default function TopBar({ sidebarOpen = false, onToggleSidebar }) {
       }
     };
 
-    if (localStorage.getItem("token")) loadUnreadCount();
+    if (getStoredToken()) loadUnreadCount();
 
     window.addEventListener("notifications:read", loadUnreadCount);
     window.addEventListener("focus", loadUnreadCount);

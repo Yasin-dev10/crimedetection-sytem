@@ -10,16 +10,22 @@ const { createDailyBlacklistAlert } = require("./blacklistAlertService");
 const { dispatchCrimeDetection } = require("./crimeDetectionService");
 const { appendIncomingDataset } = require("./datasetStore");
 const { checkCrimeText } = require("./facebookMonitor");
-const { AI_MODEL_URL } = require("../config/aiModel");
+const { AI_MODEL_URL, aiModelRequestConfig } = require("../config/aiModel");
+const {
+  extractCleanPageText,
+  cleanSomaliWebsiteText,
+} = require("../utils/pageTextCleaner");
+const { assertSomaliOnly } = require("../utils/somaliLanguage");
 
 const FETCH_TIMEOUT_MS = 12000;
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024; // 2MB
 const MAX_REDIRECTS = 3;
 const MAX_TEXT_LENGTH = 12000;
-/** How many candidate article links to discover from the homepage */
-const MAX_INTERNAL_LINKS = 20;
-/** Each by-id / watchlist scan ingests only this many NEW news pages */
-const NEWS_PER_SCAN = 1;
+/** Safety ceiling; by default this covers every article link on normal homepages. */
+const MAX_INTERNAL_LINKS = Math.max(
+  1,
+  Number(process.env.WEBSITE_MAX_INTERNAL_LINKS || 500)
+);
 const MIN_TEXT_LENGTH = 30;
 
 const BROWSER_USER_AGENT =
@@ -237,6 +243,9 @@ const fetchPageSafely = async (targetUrl) => {
 
     const response = await axios.get(parsed.toString(), {
       timeout: FETCH_TIMEOUT_MS,
+      // Do not inherit a broken HTTP_PROXY/HTTPS_PROXY value from the host.
+      // DNS and redirect SSRF protections below still validate every target.
+      proxy: false,
       maxRedirects: 0,
       responseType: "text",
       maxContentLength: MAX_RESPONSE_BYTES,
@@ -289,21 +298,25 @@ const normalizeWhitespace = (value = "") =>
   String(value).replace(/\s+/g, " ").trim();
 
 const extractPageContent = (html = "") => {
-  const $ = cheerio.load(html);
-
-  $("script, style, noscript, nav, footer, svg, iframe").remove();
-
+  const $ = cheerio.load(String(html || ""));
+  const publishedValue =
+    $("meta[property='article:published_time']").attr("content") ||
+    $("meta[name='date']").attr("content") ||
+    $("meta[name='pubdate']").attr("content") ||
+    $("time[datetime]").first().attr("datetime") ||
+    null;
+  const parsedPublishedAt = publishedValue ? new Date(publishedValue) : null;
+  const publishedAt =
+    parsedPublishedAt && !Number.isNaN(parsedPublishedAt.getTime())
+      ? parsedPublishedAt
+      : null;
+  $("script, style, noscript, nav, footer, svg, iframe, img").remove();
   const title = normalizeWhitespace($("title").first().text());
-
-  const bodyText = normalizeWhitespace(
-    $("main").text() || $("article").text() || $("body").text()
+  const text = cleanSomaliWebsiteText(
+    extractCleanPageText(html, MAX_TEXT_LENGTH),
+    MAX_TEXT_LENGTH
   );
-
-  const combined = normalizeWhitespace(
-    [title, bodyText].filter(Boolean).join(". ")
-  ).slice(0, MAX_TEXT_LENGTH);
-
-  return { $, title, text: combined };
+  return { $, title, text, publishedAt };
 };
 
 const normalizePageUrl = (value = "") => {
@@ -331,12 +344,16 @@ const discoverInternalLinks = ($, baseUrl, limit = MAX_INTERNAL_LINKS) => {
   }
 
   const baseNormalized = normalizePageUrl(baseUrl);
+  const basePathParts = base.pathname.split("/").filter(Boolean);
+  const languageSection =
+    basePathParts.length === 1 &&
+    /^(somali|so|soomaali)$/i.test(basePathParts[0])
+      ? basePathParts[0].toLowerCase()
+      : null;
   const seen = new Set();
   const links = [];
 
   $("a[href]").each((_, element) => {
-    if (links.length >= limit) return false;
-
     const href = String($(element).attr("href") || "").trim();
 
     if (!href || href.startsWith("#")) return;
@@ -353,6 +370,12 @@ const discoverInternalLinks = ($, baseUrl, limit = MAX_INTERNAL_LINKS) => {
     if (resolved.username || resolved.password) return;
     if (resolved.origin !== base.origin) return; // never leave origin
     if (NON_HTML_EXTENSIONS.test(resolved.pathname)) return;
+    if (
+      languageSection &&
+      !resolved.pathname.toLowerCase().startsWith(`/${languageSection}/`)
+    ) {
+      return;
+    }
 
     resolved.hash = "";
     const normalized = normalizePageUrl(resolved.toString());
@@ -361,10 +384,23 @@ const discoverInternalLinks = ($, baseUrl, limit = MAX_INTERNAL_LINKS) => {
     if (seen.has(normalized)) return;
 
     seen.add(normalized);
-    links.push(resolved.toString());
+    const label = normalizeWhitespace($(element).text());
+    const pathParts = resolved.pathname.split("/").filter(Boolean);
+    const score =
+      Math.min(label.length, 120) +
+      pathParts.length * 15 +
+      (/\b(news|article|story|war|warar|somali)\b/i.test(resolved.pathname)
+        ? 40
+        : 0) +
+      (/\/20\d{2}\//.test(resolved.pathname) ? 30 : 0);
+
+    links.push({ url: resolved.toString(), score });
   });
 
-  return links;
+  return links
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit)
+    .map((entry) => entry.url);
 };
 
 /* ===========================
@@ -382,32 +418,41 @@ const makeStablePageText = (text = "") =>
 
 const runCrimePrediction = async (text) => {
   let aiResult;
+  let usedAiFallback = false;
 
   try {
-    const res = await axios.post(AI_MODEL_URL, { text }, { timeout: 10000 });
+    const res = await axios.post(
+      AI_MODEL_URL,
+      { text },
+      aiModelRequestConfig({ timeout: 10000 })
+    );
     aiResult = res.data || {};
   } catch (error) {
     console.log("AI model fallback keyword check (website):", error.message);
+    usedAiFallback = true;
     aiResult = checkCrimeText(text);
   }
 
   const keywordResult = checkCrimeText(text);
   const predictionText = String(aiResult.prediction || "").toUpperCase();
 
-  const isCrime =
-    aiResult.isCrime === true ||
-    aiResult.is_crime === true ||
-    predictionText === "CRIME-RELATED" ||
-    predictionText === "CRIME RELATED" ||
-    keywordResult.isCrime;
+  // Live model decides; keywords only mark evidence. Keyword forces crime only if AI is down.
+  const isCrime = usedAiFallback
+    ? Boolean(keywordResult.isCrime)
+    : aiResult.isCrime === true ||
+      aiResult.is_crime === true ||
+      predictionText === "CRIME-RELATED" ||
+      predictionText === "CRIME RELATED";
 
   return {
     isCrime,
     prediction: isCrime ? "CRIME-RELATED" : "NOT CRIME",
-    confidence: isCrime
-      ? Math.max(aiResult.confidence || 0, keywordResult.confidence || 95)
-      : aiResult.confidence || keywordResult.confidence || 50,
-    matchedKeyword: aiResult.matchedKeyword || keywordResult.matchedKeyword,
+    confidence:
+      aiResult.confidence || (usedAiFallback ? keywordResult.confidence : 50) || 50,
+    matchedKeyword:
+      aiResult.matchedKeyword ||
+      aiResult.matched_keyword ||
+      keywordResult.matchedKeyword,
   };
 };
 
@@ -415,10 +460,53 @@ const runCrimePrediction = async (text) => {
  * Analyzes one scraped page snapshot. Returns
  * { history, created, alertCreated } or null when the page has no usable text.
  */
-const analyzeWebsitePage = async ({ item, pageUrl, text }) => {
+const analyzeWebsitePage = async ({
+  item,
+  pageUrl,
+  text,
+  publishedAt,
+  since,
+  until,
+}) => {
   const cleanText = normalizeWhitespace(text).slice(0, MAX_TEXT_LENGTH);
 
   if (!cleanText || cleanText.length < MIN_TEXT_LENGTH) return null;
+
+  if (since) {
+    const publishedTime = publishedAt ? new Date(publishedAt).getTime() : NaN;
+    const sinceTime = new Date(since).getTime();
+    const untilTime = until ? new Date(until).getTime() : Date.now();
+
+    if (
+      !Number.isFinite(publishedTime) ||
+      publishedTime < sinceTime ||
+      publishedTime > untilTime
+    ) {
+      return {
+        history: null,
+        created: false,
+        alertCreated: false,
+        skippedPeriod: true,
+      };
+    }
+  }
+
+  // Website monitoring must enforce the same language boundary as interactive
+  // text, URL, and file analysis. Do this before both the AI request and the
+  // keyword fallback so rejected pages can never become keyword crime alerts.
+  // News articles legitimately contain dates, casualty counts, and other
+  // numbers. They must not be rejected merely for containing digits.
+  const languageCheck = assertSomaliOnly(cleanText, { allowNumbers: true });
+  if (!languageCheck.ok) {
+    return {
+      history: null,
+      created: false,
+      alertCreated: false,
+      skippedLanguage: true,
+      languageReason: languageCheck.reason,
+      languageMessage: languageCheck.message,
+    };
+  }
 
   const normalizedUrl = normalizePageUrl(pageUrl);
   const textHash = fingerprint(makeStablePageText(cleanText));
@@ -442,6 +530,7 @@ const analyzeWebsitePage = async ({ item, pageUrl, text }) => {
       extractedText: cleanText,
       url: pageUrl,
       postId,
+      publishedAt: publishedAt || null,
       pageName: item.name,
       prediction: verdict.prediction,
       confidence: verdict.confidence,
@@ -515,18 +604,24 @@ const hasScrapedWebsiteUrl = async (itemId, pageUrl) => {
 };
 
 /**
- * Scans one website blacklist item by id: opens the homepage, finds article
- * links, then scrapes exactly ONE new news page that has not been stored yet.
+ * Scans one website blacklist item by id: opens the homepage, ranks likely
+ * article links, then analyzes several new Somali pages.
  */
-const scanWebsiteItem = async (item) => {
+const scanWebsiteItem = async (item, options = {}) => {
   const result = {
     itemId: item?._id || null,
     name: item?.name || null,
     scanned: 0,
     newRecords: 0,
     alerts: 0,
+    skippedLanguage: false,
+    languageReason: null,
     newsUrl: null,
     errors: [],
+    period: options.period || null,
+    since: options.since || null,
+    until: options.until || null,
+    skippedOutsidePeriod: 0,
   };
 
   if (!item || item.type !== "website") {
@@ -585,78 +680,50 @@ const scanWebsiteItem = async (item) => {
       }
     }
 
-    // 2) Pick the first candidate not yet scraped, analyze only that one
-    let picked = null;
+    // Inspect every article candidate discovered on the page. The publication
+    // date check below decides whether it belongs to the requested period.
+    const maxAttempts = MAX_INTERNAL_LINKS;
+    let attempts = 0;
 
     for (const candidateUrl of articleCandidates) {
+      if (attempts >= maxAttempts) break;
+
       const already = await hasScrapedWebsiteUrl(item._id, candidateUrl);
       if (already) continue;
-      picked = candidateUrl;
-      break;
-    }
+      attempts += 1;
 
-    if (!picked) {
-      await BlacklistItem.findByIdAndUpdate(item._id, {
-        lastScannedAt: new Date(),
-        lastScanStatus: "all discovered news already scraped",
-      });
-      return result;
-    }
+      try {
+        const { finalUrl, html } = await fetchPageSafely(candidateUrl);
+        const { text, publishedAt } = extractPageContent(html);
+        result.scanned += 1;
+        result.newsUrl = finalUrl;
 
-    try {
-      const { finalUrl, html } = await fetchPageSafely(picked);
-      const { text } = extractPageContent(html);
-      result.scanned = 1;
-      result.newsUrl = finalUrl;
+        const analysis = await analyzeWebsitePage({
+          item,
+          pageUrl: finalUrl,
+          text,
+          publishedAt,
+          since: options.since,
+          until: options.until,
+        });
 
-      const analysis = await analyzeWebsitePage({
-        item,
-        pageUrl: finalUrl,
-        text,
-      });
-
-      if (analysis?.created) result.newRecords = 1;
-      if (analysis?.alertCreated) result.alerts = 1;
-
-      // If page had no usable text / was duplicate by content hash, try next candidates
-      if (!analysis?.created) {
-        for (const nextUrl of articleCandidates) {
-          if (normalizePageUrl(nextUrl) === normalizePageUrl(picked)) continue;
-          const already = await hasScrapedWebsiteUrl(item._id, nextUrl);
-          if (already) continue;
-
-          try {
-            const nextFetch = await fetchPageSafely(nextUrl);
-            const nextContent = extractPageContent(nextFetch.html);
-            result.scanned += 1;
-            result.newsUrl = nextFetch.finalUrl;
-
-            const nextAnalysis = await analyzeWebsitePage({
-              item,
-              pageUrl: nextFetch.finalUrl,
-              text: nextContent.text,
-            });
-
-            if (nextAnalysis?.created) {
-              result.newRecords = 1;
-              if (nextAnalysis.alertCreated) result.alerts = 1;
-              break;
-            }
-          } catch (nextError) {
-            result.errors.push(`${nextUrl}: ${nextError.message}`);
-          }
-
-          // Still only allow one successful NEW news per scan
-          if (result.newRecords >= NEWS_PER_SCAN) break;
+        if (analysis?.created) result.newRecords += 1;
+        if (analysis?.alertCreated) result.alerts += 1;
+        if (analysis?.skippedPeriod) result.skippedOutsidePeriod += 1;
+        if (analysis?.skippedLanguage) {
+          result.skippedLanguage = true;
+          result.languageReason = analysis.languageReason || "not_somali";
         }
+      } catch (candidateError) {
+        result.errors.push(`${candidateUrl}: ${candidateError.message}`);
       }
-    } catch (error) {
-      result.errors.push(`${picked}: ${error.message}`);
     }
 
     const statusText =
       result.newRecords > 0
-        ? `scraped 1 news, alerts ${result.alerts}`
+        ? `scraped ${result.newRecords} news, alerts ${result.alerts}`
+        : result.skippedLanguage
+        ? `skipped-language: ${result.languageReason}`
         : result.errors.length
         ? `error: ${result.errors[0].slice(0, 180)}`
         : "no new news scraped";
@@ -682,7 +749,7 @@ const scanWebsiteItem = async (item) => {
  * Scans every active, monitor-enabled website blacklist item.
  * Manual trigger only — no background timer is started for websites.
  */
-const scanWebsiteWatchlist = async () => {
+const scanWebsiteWatchlist = async (options = {}) => {
   const results = [];
 
   try {
@@ -695,7 +762,7 @@ const scanWebsiteWatchlist = async () => {
     console.log("Website watchlist items:", items.length);
 
     for (const item of items) {
-      const result = await scanWebsiteItem(item);
+      const result = await scanWebsiteItem(item, options);
       results.push(result);
     }
   } catch (error) {
@@ -711,7 +778,10 @@ module.exports = {
   // exported for validation reuse and tests
   validateWebsiteUrlValue,
   assertSafeUrl,
+  fetchPageSafely,
   isBlockedAddress,
   normalizePageUrl,
   extractPageContent,
+  analyzeWebsitePage,
+  runCrimePrediction,
 };

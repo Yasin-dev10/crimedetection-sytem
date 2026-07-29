@@ -2,6 +2,7 @@ const crypto = require("crypto");
 const BlacklistAlert = require("../model/BlacklistAlert");
 const User = require("../model/user");
 const { sendEmailAlert } = require("./emailService");
+const { escapeHtml } = require("../utils/htmlEscape");
 
 const normalizeContent = (value = "") =>
   String(value).toLowerCase().replace(/\s+/g, " ").trim();
@@ -43,14 +44,19 @@ const sendCrimeAlertEmails = async ({ matchedValue, sourceType, priority, conten
         sendEmailAlert({
           to: admin.email,
           subject: "🚨 BAAREAI Crime Alert Detected",
-          message: `
+          message: `Crime-related content detected.
+Matched: ${matchedValue || "N/A"}
+Source: ${sourceType || "facebook"}
+Priority: ${priority || "high"}
+Content: ${String(content || "").slice(0, 1000)}`,
+          html: `
             <h2>BAAREAI Crime Alert</h2>
             <p><b>Crime-related content detected.</b></p>
-            <p><b>Matched:</b> ${matchedValue || "N/A"}</p>
-            <p><b>Source:</b> ${sourceType || "facebook"}</p>
-            <p><b>Priority:</b> ${priority || "high"}</p>
+            <p><b>Matched:</b> ${escapeHtml(matchedValue || "N/A")}</p>
+            <p><b>Source:</b> ${escapeHtml(sourceType || "facebook")}</p>
+            <p><b>Priority:</b> ${escapeHtml(priority || "high")}</p>
             <p><b>Content:</b></p>
-            <p>${String(content || "").slice(0, 1000)}</p>
+            <p>${escapeHtml(String(content || "").slice(0, 1000))}</p>
           `,
         })
       )

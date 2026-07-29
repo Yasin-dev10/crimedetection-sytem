@@ -2,6 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const ExcelJS = require("exceljs");
 const History = require("../model/History");
+const { cleanExtractedText } = require("../utils/pageTextCleaner");
 
 const DATASET_DIR = path.join(__dirname, "..", "..", "model");
 const DATASET_XLSX = path.join(DATASET_DIR, "collected_dataset.xlsx");
@@ -54,6 +55,10 @@ function toDatasetRow(doc) {
       text = content;
     }
   }
+
+  // Clean at read/export time so historical database records benefit too.
+  // A migration is deliberately unnecessary and the original evidence remains intact.
+  text = cleanExtractedText(text, 50000);
 
   return {
     url: url || "",

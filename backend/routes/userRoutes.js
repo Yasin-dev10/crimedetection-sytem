@@ -2,6 +2,7 @@ const express = require("express");
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
+const crypto = require("crypto");
 
 const {
   getUsers,
@@ -19,6 +20,13 @@ const {
 
 const router = express.Router();
 
+const ALLOWED_IMAGE_MIME = {
+  "image/jpeg": ".jpg",
+  "image/png": ".png",
+  "image/webp": ".webp",
+  "image/gif": ".gif",
+};
+
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
     const uploadPath = path.join(__dirname, "..", "uploads", "investigator");
@@ -27,14 +35,24 @@ const storage = multer.diskStorage({
   },
 
   filename: function (req, file, cb) {
+    const ext = ALLOWED_IMAGE_MIME[file.mimetype] || "";
     cb(
       null,
-      Date.now() + "-" + file.originalname
+      `${Date.now()}-${crypto.randomBytes(8).toString("hex")}${ext}`
     );
   },
 });
 
-const upload = multer({ storage });
+const upload = multer({
+  storage,
+  limits: { fileSize: 2 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    if (ALLOWED_IMAGE_MIME[file.mimetype]) {
+      return cb(null, true);
+    }
+    return cb(new Error("Only jpeg, png, webp, and gif images are allowed"));
+  },
+});
 
 router.get("/", protect, adminOnly, getUsers);
 

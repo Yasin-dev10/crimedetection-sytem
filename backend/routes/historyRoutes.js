@@ -2,10 +2,15 @@ const express = require("express");
 const router = express.Router();
 
 const History = require("../model/History");
-const { protect, investigatorOrAdmin } = require("../middleware/authMiddleware");
+const {
+  protect,
+  investigatorOrAdmin,
+  datasetManagerOnly,
+} = require("../middleware/authMiddleware");
 const {
   buildDatasetWorkbook,
   buildDatasetCsv,
+  toDatasetRow,
 } = require("../services/datasetStore");
 
 const canViewAllHistory = (user) =>
@@ -13,19 +18,19 @@ const canViewAllHistory = (user) =>
 
 // Export collected analysis data as Excel (.xlsx) for dataset study / retraining
 // Query: ?source=all|analysis|facebook|website&scope=all|mine&format=xlsx|csv
-router.get("/dataset/export", protect, async (req, res) => {
+router.get(
+  "/dataset/export",
+  protect,
+  datasetManagerOnly,
+  async (req, res) => {
   try {
     const format = String(req.query.format || "xlsx").toLowerCase();
     const source = String(req.query.source || "all").toLowerCase();
-    const scope = String(req.query.scope || "all").toLowerCase();
-
-    const mineOnly = scope === "mine" || !canViewAllHistory(req.user);
     const options = {
       source: ["all", "analysis", "facebook", "website"].includes(source)
         ? source
         : "all",
-      userId: req.user._id,
-      mineOnly,
+      mineOnly: false,
     };
 
     const stamp = new Date().toISOString().slice(0, 10);
@@ -56,8 +61,49 @@ router.get("/dataset/export", protect, async (req, res) => {
     console.error("Dataset export error:", error);
     res.status(500).json({
       message: "Dataset export failed",
-      error: error.message,
     });
+  }
+});
+
+// Private dataset overview. No admin, investigator, or ordinary user can access it.
+router.get("/dataset", protect, datasetManagerOnly, async (req, res) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 25));
+    const skip = (page - 1) * limit;
+    const source = String(req.query.source || "all").toLowerCase();
+    const filter = {};
+
+    if (source === "facebook") filter.sourceType = "facebook";
+    else if (source === "website") filter.sourceType = "website";
+    else if (source === "analysis") {
+      filter.sourceType = { $nin: ["facebook", "website"] };
+    }
+
+    const [total, crime, notCrime, records] = await Promise.all([
+      History.countDocuments(filter),
+      History.countDocuments({ ...filter, isCrime: true }),
+      History.countDocuments({ ...filter, isCrime: false }),
+      History.find(filter)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .select("sourceType content extractedText url prediction confidence isCrime matchedKeyword investigationStatus createdAt")
+        .lean(),
+    ]);
+
+    res.json({
+      stats: { total, crime, notCrime },
+      page,
+      totalPages: Math.max(1, Math.ceil(total / limit)),
+      records: records.map((record) => ({
+        _id: record._id,
+        ...toDatasetRow(record),
+      })),
+    });
+  } catch (error) {
+    console.error("Dataset overview error:", error);
+    res.status(500).json({ message: "Failed to load dataset" });
   }
 });
 
@@ -90,7 +136,7 @@ router.get("/my", protect, async (req, res) => {
     });
   } catch (error) {
     console.error("My history error:", error);
-    res.status(500).json({ message: "My history error", error: error.message });
+    res.status(500).json({ message: "My history error" });
   }
 });
 
@@ -109,7 +155,7 @@ router.get("/general", protect, investigatorOrAdmin, async (req, res) => {
     res.json(data);
   } catch (error) {
     console.error("General history error:", error);
-    res.status(500).json({ message: "General history error", error: error.message });
+    res.status(500).json({ message: "General history error" });
   }
 });
 
@@ -124,7 +170,7 @@ router.get("/blacklist", protect, investigatorOrAdmin, async (req, res) => {
     res.json(data);
   } catch (error) {
     console.error("Blacklist history error:", error);
-    res.status(500).json({ message: "Blacklist history error", error: error.message });
+    res.status(500).json({ message: "Blacklist history error" });
   }
 });
 
@@ -138,7 +184,7 @@ router.get("/", protect, async (req, res) => {
     res.json(data);
   } catch (error) {
     console.error("History error:", error);
-    res.status(500).json({ message: "History error", error: error.message });
+    res.status(500).json({ message: "History error" });
   }
 });
 
@@ -156,7 +202,7 @@ router.delete("/:id", protect, async (req, res) => {
     res.json({ success: true });
   } catch (error) {
     console.error("Delete history error:", error);
-    res.status(500).json({ message: "Delete history error", error: error.message });
+    res.status(500).json({ message: "Delete history error" });
   }
 });
 

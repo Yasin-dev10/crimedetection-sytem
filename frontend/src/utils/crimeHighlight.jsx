@@ -174,7 +174,8 @@ function buildPattern(extraTerms = []) {
 }
 
 /**
- * Highlight crime-related words in red when content is a crime case.
+ * Highlight crime keywords for evidence marking.
+ * Decision (Crime / Not-crime) comes from the model; keywords only annotate the text.
  * @param {string} text
  * @param {boolean} isCrime
  * @param {{ matchedKeyword?: string, blacklistMatches?: array }} [options]
@@ -182,13 +183,20 @@ function buildPattern(extraTerms = []) {
 export function renderCrimeHighlightedText(text, isCrime, options = {}) {
   const displayText = String(text || "");
   if (!displayText) return displayText;
-  if (!isCrime) return displayText;
 
   const extras = collectExtraTerms(
     options.matchedKeyword,
     options.blacklistMatches
   );
-  const built = buildPattern(extras);
+
+  // Crime decisions: highlight known crime terms + matched keyword.
+  // Not-crime: still mark matchedKeyword if present (annotation only).
+  const built = isCrime
+    ? buildPattern(extras)
+    : extras.length
+      ? buildPatternFromTermsOnly(extras)
+      : null;
+
   if (!built) return displayText;
 
   const termSet = new Set(built.terms.map((t) => t.toLowerCase()));
@@ -209,6 +217,28 @@ export function renderCrimeHighlightedText(text, isCrime, options = {}) {
       </React.Fragment>
     );
   });
+}
+
+function buildPatternFromTermsOnly(terms = []) {
+  const unique = [];
+  const seen = new Set();
+  [...terms]
+    .map((term) => String(term || "").trim())
+    .filter((term) => term.length >= 2)
+    .sort((a, b) => b.length - a.length)
+    .forEach((term) => {
+      const key = term.toLowerCase();
+      if (seen.has(key)) return;
+      seen.add(key);
+      unique.push(term);
+    });
+
+  if (!unique.length) return null;
+
+  return {
+    terms: unique,
+    pattern: new RegExp(`(${unique.map(escapeRegExp).join("|")})`, "gi"),
+  };
 }
 
 export { CRIME_TERMS };

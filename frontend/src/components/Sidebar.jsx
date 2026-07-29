@@ -11,6 +11,8 @@ import {
   FileBarChart2,
   Shield,
   ScrollText,
+  History,
+  Database,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import API, { clearStoredSession } from "../api";
@@ -20,15 +22,17 @@ const menu = [
   {
     title: "Menu",
     items: [
-      { name: "Dashboard", path: "/dashboard", icon: LayoutDashboard, roles: ["admin"] },
+      { name: "Dashboard", path: "/dashboard", icon: LayoutDashboard, roles: ["admin", "user"] },
+      { name: "Dataset Manager", path: "/dataset", icon: Database, roles: ["dataset_manager"] },
       { name: "User Management", path: "/users", icon: Users, roles: ["admin"] },
       { name: "Blacklist Management", path: "/blacklist", icon: ShieldAlert, roles: ["admin", "investigator"] },
       { name: "Case Management", path: "/cases", icon: ListChecks, roles: ["admin", "investigator"] },
-      { name: "Analysis", path: "/analysis", icon: BrainCircuit, roles: ["user"] },
+      { name: "Analysis", path: "/workspace/analysis", icon: BrainCircuit, roles: ["user"] },
+      { name: "History", path: "/history", icon: History, roles: ["user"] },
       { name: "Reports", path: "/reports", icon: FileBarChart2, roles: ["admin", "investigator"] },
       { name: "Audit Logs", path: "/audit-logs", icon: ScrollText, roles: ["admin"] },
-      { name: "Profile", path: "/profile", icon: UserCircle, roles: ["admin", "investigator", "user"] },
-      { name: "Settings", path: "/settings", icon: Settings, roles: ["admin", "investigator"] },
+      { name: "Profile", path: "/profile", icon: UserCircle, roles: ["admin", "investigator", "dataset_manager", "user"] },
+      { name: "Settings", path: "/settings", icon: Settings, roles: ["admin", "investigator", "dataset_manager", "user"] },
     ],
   },
 ];

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import Counter
 from pathlib import Path
+from urllib.parse import urlparse
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -61,6 +62,81 @@ def plot_duplicates(n_dupes: int, n_unique: int, out: Path, caption: str):
     ax.set_ylim(0, max(vals) * 1.15)
     note = f"Duplicate-yada waa la tirtiray ka hor training. {caption}"
     _finish(fig, out, note)
+
+
+def plot_dataset_sources(df: pd.DataFrame, out: Path):
+    """Show the website/domain each dataset row came from and its exact count."""
+
+    def source_name(value) -> str:
+        raw = str(value or "").strip()
+        if not raw or raw.lower() == "nan":
+            return "URL ma leh"
+        parsed = urlparse(raw if "://" in raw else f"https://{raw}")
+        host = parsed.netloc.lower().split("@")[-1].split(":")[0]
+        host = host.removeprefix("www.").removeprefix("m.")
+        if not host or "." not in host or any(char.isspace() for char in host):
+            return "URL aan sax ahayn"
+        known = {
+            "bbc.com": "BBC Somali",
+            "voasomali.com": "VOA Somali",
+            "facebook.com": "Facebook",
+            "l.facebook.com": "Facebook",
+            "goobjoog.com": "Goobjoog",
+            "radiorisaala.com": "Radio Risaala",
+            "youtube.com": "YouTube",
+        }
+        return known.get(host, host or "URL aan sax ahayn")
+
+    source_df = df.copy()
+    source_df["source"] = source_df.get(
+        "url", pd.Series("", index=source_df.index)
+    ).map(source_name)
+    order = source_df["source"].value_counts().index.tolist()
+    counts = (
+        pd.crosstab(source_df["source"], source_df["category"])
+        .reindex(index=order, fill_value=0)
+        .reindex(columns=[LABEL_CRIME, LABEL_SAFE], fill_value=0)
+    )
+
+    height = max(5.2, 0.55 * len(counts) + 2.2)
+    fig, ax = plt.subplots(figsize=(12, height))
+    y = np.arange(len(counts))
+    crime = counts[LABEL_CRIME].to_numpy()
+    safe = counts[LABEL_SAFE].to_numpy()
+    total = crime + safe
+
+    ax.barh(y, crime, color=COLOR_CRIME, edgecolor="white", label=DISPLAY_ONE_LINE[LABEL_CRIME])
+    ax.barh(
+        y,
+        safe,
+        left=crime,
+        color=COLOR_SAFE,
+        edgecolor="white",
+        label=DISPLAY_ONE_LINE[LABEL_SAFE],
+    )
+    ax.set_yticks(y)
+    ax.set_yticklabels(counts.index)
+    ax.invert_yaxis()
+    ax.set_xlabel("Tirada qoraallada (documents)")
+    ax.set_ylabel("Isha / website-ka dataset-ka")
+    ax.set_title("Meelaha laga keenay dataset-ka iyo tirada il kasta", fontweight="bold")
+    ax.legend(loc="lower right", fontsize=9)
+    ax.grid(axis="x", alpha=0.25)
+    ax.grid(axis="y", visible=False)
+
+    offset = max(int(total.max() * 0.012), 1) if len(total) else 1
+    for row, value in enumerate(total):
+        ax.text(value + offset, row, f"{value:,}", va="center", fontweight="bold")
+    ax.set_xlim(0, max(total.max() * 1.14, 1) if len(total) else 1)
+
+    _finish(
+        fig,
+        out,
+        dataset_caption(
+            source_df,
+            f"Ilaha kala duwan: {len(counts):,} | Tiradu waxay ku salaysan tahay URL-ka row kasta",
+        ),
+    )
 
 
 def plot_category_balance(df: pd.DataFrame, out: Path):

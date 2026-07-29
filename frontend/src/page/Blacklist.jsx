@@ -44,6 +44,7 @@ export default function Blacklist() {
   const [statsLoading, setStatsLoading] = useState(false);
   const [scanningAll, setScanningAll] = useState(false);
   const [scanningId, setScanningId] = useState("");
+  const [scanPeriod, setScanPeriod] = useState("week");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [detailData, setDetailData] = useState(null);
@@ -294,7 +295,8 @@ export default function Blacklist() {
       setError("");
       setSuccess("");
       await API.post(
-        isWebsite ? "/blacklist/website/scan" : "/blacklist/facebook/scan"
+        isWebsite ? "/blacklist/website/scan" : "/blacklist/facebook/scan",
+        { period: scanPeriod }
       );
       await loadBlacklist();
       setSuccess(
@@ -322,12 +324,13 @@ export default function Blacklist() {
       await API.post(
         isWebsite
           ? `/blacklist/website/scan/${id}`
-          : `/blacklist/facebook/scan/${id}`
+          : `/blacklist/facebook/scan/${id}`,
+        { period: scanPeriod }
       );
       await loadBlacklist();
       setSuccess(
         isWebsite
-          ? "Website scanned — 1 news article fetched. Open results or Notifications for crime content."
+          ? "Website scanned. New Somali articles are available in Results and Notifications."
           : "Page scanned. Open posts or Notifications to send crime content to Case Management."
       );
     } catch (err) {
@@ -476,24 +479,42 @@ export default function Blacklist() {
               </button>
 
               {(view === "facebook" || view === "website") && (
-                <button
-                  type="button"
-                  onClick={scanAllPages}
-                  disabled={scanningAll}
-                  className="inline-flex items-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-bold transition hover:opacity-90 disabled:opacity-60"
-                  style={{
-                    background: "var(--brand-soft)",
-                    borderColor: "var(--brand-ring)",
-                    color: "var(--brand)",
-                  }}
-                >
-                  <RefreshCw size={16} className={scanningAll ? "animate-spin" : ""} />
-                  {scanningAll
-                    ? "Scanning All..."
-                    : view === "website"
-                    ? "Scan All Websites"
-                    : "Scan All Facebook"}
-                </button>
+                <>
+                  <select
+                    value={scanPeriod}
+                    onChange={(event) => setScanPeriod(event.target.value)}
+                    disabled={scanningAll || Boolean(scanningId)}
+                    aria-label="Select scan period"
+                    className="rounded-xl border px-3 py-2.5 text-sm font-bold disabled:opacity-60"
+                    style={{
+                      background: "var(--bg-card)",
+                      borderColor: "var(--border-base)",
+                      color: "var(--text-primary)",
+                    }}
+                  >
+                    <option value="week">Last week</option>
+                    <option value="month">Last month</option>
+                    <option value="year">Last year</option>
+                  </select>
+                  <button
+                    type="button"
+                    onClick={scanAllPages}
+                    disabled={scanningAll}
+                    className="inline-flex items-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-bold transition hover:opacity-90 disabled:opacity-60"
+                    style={{
+                      background: "var(--brand-soft)",
+                      borderColor: "var(--brand-ring)",
+                      color: "var(--brand)",
+                    }}
+                  >
+                    <RefreshCw size={16} className={scanningAll ? "animate-spin" : ""} />
+                    {scanningAll
+                      ? "Scanning All..."
+                      : view === "website"
+                      ? "Scan All Websites"
+                      : "Scan All Facebook"}
+                  </button>
+                </>
               )}
             </div>
           </div>

@@ -1,22 +1,44 @@
 const jwt = require("jsonwebtoken");
 const User = require("../model/user");
+const { AUTH_USER_FIELDS } = require("../utils/userSelect");
+
+const extractToken = (req) => {
+  if (req.headers.authorization && req.headers.authorization.startsWith("Bearer")) {
+    return req.headers.authorization.split(" ")[1];
+  }
+  if (req.cookies?.token) return req.cookies.token;
+  return null;
+};
+
+const attachUserFromToken = async (token) => {
+  const decoded = jwt.verify(token, process.env.JWT_SECRET);
+  const user = await User.findById(decoded.id).select(AUTH_USER_FIELDS);
+
+  if (!user) {
+    const error = new Error("User not found");
+    error.status = 401;
+    throw error;
+  }
+
+  if (decoded.sessionId) {
+    if (!user.activeSessionId || user.activeSessionId !== decoded.sessionId) {
+      const error = new Error("Session expired");
+      error.status = 401;
+      throw error;
+    }
+  }
+
+  return { user, sessionId: decoded.sessionId || null };
+};
 
 const protect = async (req, res, next) => {
   try {
-    let token;
-
-    if (req.headers.authorization && req.headers.authorization.startsWith("Bearer")) {
-      token = req.headers.authorization.split(" ")[1];
-    }
-
+    const token = extractToken(req);
     if (!token) return res.status(401).json({ message: "No token" });
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-
-    req.user = await User.findById(decoded.id).select("-password");
-    req.authSessionId = decoded.sessionId || null;
-
-    if (!req.user) return res.status(401).json({ message: "User not found" });
+    const { user, sessionId } = await attachUserFromToken(token);
+    req.user = user;
+    req.authSessionId = sessionId;
 
     const accountStatus = req.user.account_status || "active";
     if (
@@ -34,7 +56,7 @@ const protect = async (req, res, next) => {
 
     next();
   } catch (error) {
-    res.status(401).json({ message: "Token failed" });
+    res.status(401).json({ message: error.message === "Session expired" ? "Session expired" : "Token failed" });
   }
 };
 
@@ -54,15 +76,20 @@ const investigatorOrAdmin = (req, res, next) => {
   }
 };
 
-// Optional: attaches req.user if token is present, but never rejects
+const datasetManagerOnly = (req, res, next) => {
+  if (req.user && req.user.role === "dataset_manager") {
+    return next();
+  }
+  return res.status(403).json({ message: "Dataset Manager only" });
+};
+
 const optionalProtect = async (req, res, next) => {
   try {
-    const authHeader = req.headers.authorization;
-    if (authHeader && authHeader.startsWith("Bearer")) {
-      const token = authHeader.split(" ")[1];
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
-      req.user = await User.findById(decoded.id).select("-password");
-      req.authSessionId = decoded.sessionId || null;
+    const token = extractToken(req);
+    if (token) {
+      const { user, sessionId } = await attachUserFromToken(token);
+      req.user = user;
+      req.authSessionId = sessionId;
     }
   } catch {
     // No valid token — continue as guest
@@ -70,4 +97,10 @@ const optionalProtect = async (req, res, next) => {
   next();
 };
 
-module.exports = { protect, adminOnly, investigatorOrAdmin, optionalProtect };
+module.exports = {
+  protect,
+  adminOnly,
+  investigatorOrAdmin,
+  datasetManagerOnly,
+  optionalProtect,
+};

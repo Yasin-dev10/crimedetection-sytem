@@ -46,6 +46,8 @@ def main():
     )
     df = df[df["category"].isin([CRIME_LABEL, NON_CRIME_LABEL])].copy()
 
+    charts.plot_dataset_sources(df, OUTPUT_DIR / "00a_dataset_sources.png")
+
     n_before = len(df)
     n_dupes = int(df.duplicated(subset=["text"]).sum())
     charts.plot_duplicates(

@@ -1,4 +1,5 @@
 const nodemailer = require("nodemailer");
+const { escapeHtml } = require("../utils/htmlEscape");
 const {
   buildCaseAssignmentEmailHtml,
   getCaseAssignmentDetails,
@@ -22,17 +23,23 @@ const getSender = (label = "BAAREAI") => `"${label}" <${emailUser}>`;
 const sendEmailAlert = async ({
   to,
   subject,
-  message,
+  message = "",
+  html,
 }) => {
   try {
+    const htmlContent =
+      html ||
+      `
+        <h2>BAAREAI Crime Alert</h2>
+        <p>${escapeHtml(message)}</p>
+      `;
+
     await transporter.sendMail({
       from: getSender("BAAREAI Alert"),
       to,
       subject,
-      html: `
-        <h2>BAAREAI Crime Alert</h2>
-        <p>${message}</p>
-      `,
+      text: message,
+      html: htmlContent,
     });
 
     console.log("EMAIL SENT:", to);
@@ -48,7 +55,7 @@ const sendVerificationEmail = async (to, verificationToken, userName) => {
     const htmlContent = `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
         <h2 style="color: #333;">BAAREAI - Email Verification</h2>
-        <p>Hello ${userName},</p>
+        <p>Hello ${escapeHtml(userName)},</p>
         <p>Thank you for joining BAAREAI. Please verify your email address to complete your registration.</p>
         <p style="margin: 30px 0;">
           <a href="${verificationLink}" style="background-color: #4CAF50; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">
@@ -82,13 +89,13 @@ const sendCredentialsEmail = async (to, userName, password, role) => {
     const htmlContent = `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
         <h2 style="color: #333;">BAAREAI - Your Account Credentials</h2>
-        <p>Hello ${userName},</p>
-        <p>Your ${role} account has been created successfully. Here are your login credentials:</p>
+        <p>Hello ${escapeHtml(userName)},</p>
+        <p>Your ${escapeHtml(role)} account has been created successfully. Here are your login credentials:</p>
         
         <div style="background-color: #f5f5f5; padding: 15px; border-radius: 5px; margin: 20px 0;">
-          <p><strong>Email:</strong> ${to}</p>
-          <p><strong>Password:</strong> ${password}</p>
-          <p><strong>Role:</strong> ${role}</p>
+          <p><strong>Email:</strong> ${escapeHtml(to)}</p>
+          <p><strong>Password:</strong> ${escapeHtml(password)}</p>
+          <p><strong>Role:</strong> ${escapeHtml(role)}</p>
         </div>
 
         <p style="color: #d32f2f; font-weight: bold;">⚠️ IMPORTANT:</p>
@@ -137,12 +144,12 @@ const sendOTPEmail = async (to, otpCode, userName) => {
         </div>
 
         <h2 style="color: #f1f5f9; font-size: 22px; margin-bottom: 8px;">Email Verification Code</h2>
-        <p style="color: #94a3b8; margin-bottom: 32px;">Hello <strong style="color: #e2e8f0;">${userName}</strong>, use the code below to verify your email address.</p>
+        <p style="color: #94a3b8; margin-bottom: 32px;">Hello <strong style="color: #e2e8f0;">${escapeHtml(userName)}</strong>, use the code below to verify your email address.</p>
 
         <div style="background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 32px; text-align: center; margin-bottom: 32px;">
           <p style="color: #64748b; font-size: 13px; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 16px;">Your Verification Code</p>
           <div style="font-size: 48px; font-weight: 900; letter-spacing: 12px; color: #06b6d4; font-family: monospace;">
-            ${otpCode}
+            ${escapeHtml(otpCode)}
           </div>
           <p style="color: #64748b; font-size: 12px; margin-top: 16px;">⏱ This code expires in <strong>15 minutes</strong></p>
         </div>
@@ -203,7 +210,7 @@ const sendOTPWithPasswordEmail = async (to, otpCode, password, userName, role) =
 
         <h2 style="color: #f1f5f9; font-size: 22px; margin-bottom: 6px;">Account Created — Verify Your Email</h2>
         <p style="color: #94a3b8; margin-bottom: 32px;">
-          Hello <strong style="color: #e2e8f0;">${userName}</strong>, your <strong style="color: #06b6d4;">${role}</strong> account has been created.
+          Hello <strong style="color: #e2e8f0;">${escapeHtml(userName)}</strong>, your <strong style="color: #06b6d4;">${escapeHtml(role)}</strong> account has been created.
           Below you will find everything you need to get started.
         </p>
 
@@ -211,7 +218,7 @@ const sendOTPWithPasswordEmail = async (to, otpCode, password, userName, role) =
         <div style="background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 28px; text-align: center; margin-bottom: 24px;">
           <p style="color: #64748b; font-size: 12px; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 12px;">Step 1 — Email Verification Code</p>
           <div style="font-size: 46px; font-weight: 900; letter-spacing: 12px; color: #06b6d4; font-family: monospace;">
-            ${otpCode}
+            ${escapeHtml(otpCode)}
           </div>
           <p style="color: #64748b; font-size: 12px; margin-top: 12px;">⏱ Expires in <strong>15 minutes</strong></p>
         </div>
@@ -232,15 +239,15 @@ const sendOTPWithPasswordEmail = async (to, otpCode, password, userName, role) =
           <table style="width: 100%; border-collapse: collapse;">
             <tr>
               <td style="color: #64748b; font-size: 13px; padding: 8px 0; width: 90px;">Email</td>
-              <td style="color: #e2e8f0; font-size: 13px; font-weight: 600; padding: 8px 0;">${to}</td>
+              <td style="color: #e2e8f0; font-size: 13px; font-weight: 600; padding: 8px 0;">${escapeHtml(to)}</td>
             </tr>
             <tr>
               <td style="color: #64748b; font-size: 13px; padding: 8px 0;">Password</td>
-              <td style="color: #06b6d4; font-size: 15px; font-weight: 900; font-family: monospace; padding: 8px 0; letter-spacing: 1px;">${password}</td>
+              <td style="color: #06b6d4; font-size: 15px; font-weight: 900; font-family: monospace; padding: 8px 0; letter-spacing: 1px;">${escapeHtml(password)}</td>
             </tr>
             <tr>
               <td style="color: #64748b; font-size: 13px; padding: 8px 0;">Role</td>
-              <td style="color: #e2e8f0; font-size: 13px; font-weight: 600; padding: 8px 0; text-transform: capitalize;">${role}</td>
+              <td style="color: #e2e8f0; font-size: 13px; font-weight: 600; padding: 8px 0; text-transform: capitalize;">${escapeHtml(role)}</td>
             </tr>
           </table>
         </div>
@@ -294,12 +301,12 @@ const sendLoginOTPEmail = async (to, otpCode, userName) => {
         </div>
 
         <h2 style="color: #f1f5f9; font-size: 22px; margin-bottom: 8px;">Login Verification Code</h2>
-        <p style="color: #94a3b8; margin-bottom: 32px;">Hello <strong style="color: #e2e8f0;">${userName}</strong>, use the code below to complete your login.</p>
+        <p style="color: #94a3b8; margin-bottom: 32px;">Hello <strong style="color: #e2e8f0;">${escapeHtml(userName)}</strong>, use the code below to complete your login.</p>
 
         <div style="background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 32px; text-align: center; margin-bottom: 32px;">
           <p style="color: #64748b; font-size: 13px; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 16px;">Your Login Code</p>
           <div style="font-size: 48px; font-weight: 900; letter-spacing: 12px; color: #818cf8; font-family: monospace;">
-            ${otpCode}
+            ${escapeHtml(otpCode)}
           </div>
           <p style="color: #64748b; font-size: 12px; margin-top: 16px;">⏱ This code expires in <strong>15 minutes</strong></p>
         </div>
@@ -343,12 +350,12 @@ const sendPasswordResetOTPEmail = async (to, otpCode, userName) => {
         </div>
 
         <h2 style="color: #f1f5f9; font-size: 22px; margin-bottom: 8px;">Password Reset Code</h2>
-        <p style="color: #94a3b8; margin-bottom: 32px;">Hello <strong style="color: #e2e8f0;">${userName}</strong>, use the code below to reset your password.</p>
+        <p style="color: #94a3b8; margin-bottom: 32px;">Hello <strong style="color: #e2e8f0;">${escapeHtml(userName)}</strong>, use the code below to reset your password.</p>
 
         <div style="background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 32px; text-align: center; margin-bottom: 32px;">
           <p style="color: #64748b; font-size: 13px; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 16px;">Your Reset Code</p>
           <div style="font-size: 48px; font-weight: 900; letter-spacing: 12px; color: #f59e0b; font-family: monospace;">
-            ${otpCode}
+            ${escapeHtml(otpCode)}
           </div>
           <p style="color: #64748b; font-size: 12px; margin-top: 16px;">⏱ This code expires in <strong>15 minutes</strong></p>
         </div>
@@ -388,7 +395,7 @@ const sendPasswordChangeVerificationEmail = async (to, changeToken, userName) =>
     const htmlContent = `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
         <h2 style="color: #333;">BAAREAI - Password Change Verification</h2>
-        <p>Hello ${userName},</p>
+        <p>Hello ${escapeHtml(userName)},</p>
         <p>We received a request to change your password. Please click the link below to verify and proceed:</p>
         
         <p style="margin: 30px 0;">

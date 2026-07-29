@@ -329,6 +329,19 @@ export default function WebsitePages() {
                       <Badge color="gray">{page.investigationStatus}</Badge>
                     )}
                     {alreadySent && <Badge color="cyan">Sent to Case</Badge>}
+                    {page.postId && (
+                      <span
+                        className="max-w-full truncate rounded-full px-2 py-0.5 font-mono text-xs"
+                        style={{
+                          background: "var(--bg-elevated)",
+                          color: "var(--text-muted)",
+                          border: "1px solid var(--border-base)",
+                        }}
+                        title={page.postId}
+                      >
+                        ID: {page.postId}
+                      </span>
+                    )}
                     <span
                       className="text-xs"
                       style={{ color: "var(--text-muted)" }}

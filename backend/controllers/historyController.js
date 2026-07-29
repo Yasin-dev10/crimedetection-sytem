@@ -22,10 +22,11 @@ const getHistory = async (req, res) => {
     }
 
     if (search) {
+      const escapedSearch = search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       query.$or = [
-        { content: { $regex: search, $options: "i" } },
-        { extractedText: { $regex: search, $options: "i" } },
-        { "blacklistMatches.value": { $regex: search, $options: "i" } },
+        { content: { $regex: escapedSearch, $options: "i" } },
+        { extractedText: { $regex: escapedSearch, $options: "i" } },
+        { "blacklistMatches.value": { $regex: escapedSearch, $options: "i" } },
       ];
     }
 

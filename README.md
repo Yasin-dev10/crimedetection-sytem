@@ -223,6 +223,14 @@ cd backend
 npm run seed:admin
 ```
 
+Seed the private Dataset Manager independently from the admin:
+
+```bash
+# Configure DATASET_MANAGER_NAME, DATASET_MANAGER_EMAIL, and
+# DATASET_MANAGER_PASSWORD in backend/.env first.
+npm run seed:dataset-manager
+```
+
 Credentials are printed in the terminal (defined in `backend/seedAdmin.js`). Change the password after first login in production.
 
 ---

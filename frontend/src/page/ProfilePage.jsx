@@ -13,7 +13,7 @@ import {
   KeyRound,
   Lock,
 } from "lucide-react";
-import API from "../api";
+import API, { API_BASE_URL, getStoredToken } from "../api";
 import ChangePasswordModal from "../components/ChangePasswordModal";
 
 export default function ProfilePage() {
@@ -22,13 +22,15 @@ export default function ProfilePage() {
   const [error, setError] = useState("");
   const [showPasswordModal, setShowPasswordModal] = useState(false);
 
-  const fallbackUser = JSON.parse(localStorage.getItem("user") || "null");
-  const token = localStorage.getItem("token");
+  const fallbackUser = JSON.parse(
+    sessionStorage.getItem("user") || localStorage.getItem("user") || "null"
+  );
+  const token = getStoredToken();
 
   const getImageUrl = (image) => {
     if (!image) return null;
     if (image.startsWith("http")) return image;
-    return `http://localhost:5000${image}`;
+    return `${API_BASE_URL}${image}`;
   };
 
   const formatDate = (date) => {

@@ -12,7 +12,7 @@ dotenv.config({ path: path.join(__dirname, "..", ".env") });
 
 const BASE = `http://localhost:${process.env.PORT || 5000}/api/auth`;
 const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || "admin@bareai.com").trim().toLowerCase();
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "Admin@12345";
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
 const TEST_PHONE = process.argv[2] || process.env.TEST_PHONE || "";
 const VERIFY_CODE = process.argv[3] || "";
 
@@ -32,6 +32,11 @@ async function request(method, urlPath, body, token) {
 
 async function main() {
   console.log("=== BAREAI Phone Verification Test ===\n");
+
+  if (!ADMIN_PASSWORD) {
+    console.error("ADMIN_PASSWORD env var is required (no default password).");
+    process.exit(1);
+  }
 
   const health = await fetch(`http://localhost:${process.env.PORT || 5000}/`);
   if (!health.ok) {

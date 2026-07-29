@@ -2,29 +2,38 @@ const bcrypt = require("bcryptjs");
 const dotenv = require("dotenv");
 const mongoose = require("mongoose");
 const User = require("./model/user");
+const { validatePasswordStrength } = require("./utils/passwordPolicy");
 
 dotenv.config();
-
-const adminSeed = {
-  name: "BAREAI Admin",
-  email: "yasindev216@gmail.com",
-  password: "Password@2026",
-};
 
 const seedAdmin = async () => {
   if (!process.env.MONGO_URI) {
     throw new Error("MONGO_URI is not configured in backend/.env");
   }
 
+  const email = (process.env.ADMIN_EMAIL || "").trim().toLowerCase();
+  const password = process.env.ADMIN_PASSWORD || "";
+
+  if (!email || !password) {
+    throw new Error(
+      "Set ADMIN_EMAIL and ADMIN_PASSWORD in backend/.env before running seedAdmin"
+    );
+  }
+
+  const strength = validatePasswordStrength(password);
+  if (!strength.ok) {
+    throw new Error(strength.message);
+  }
+
   await mongoose.connect(process.env.MONGO_URI);
 
-  const hashedPassword = await bcrypt.hash(adminSeed.password, 10);
+  const hashedPassword = await bcrypt.hash(password, 10);
 
   const admin = await User.findOneAndUpdate(
-    { email: adminSeed.email.toLowerCase() },
+    { email },
     {
-      name: adminSeed.name,
-      email: adminSeed.email.toLowerCase(),
+      name: process.env.ADMIN_NAME || "BAREAI Admin",
+      email,
       password: hashedPassword,
       role: "admin",
       status: "active",
@@ -34,7 +43,8 @@ const seedAdmin = async () => {
       emailVerified: true,
       emailVerificationOTP: null,
       emailVerificationOTPExpiry: null,
-      isPasswordChangeRequired: false,
+      isPasswordChangeRequired: true,
+      activeSessionId: null,
     },
     {
       new: true,
@@ -45,18 +55,19 @@ const seedAdmin = async () => {
   );
 
   console.log("==================================");
-  console.log("✅ Admin seed completed");
+  console.log("Admin seed completed");
   console.log("Email:", admin.email);
-  console.log("Password:", adminSeed.password);
+  console.log("Password: [hidden — taken from ADMIN_PASSWORD env]");
   console.log("Role:", admin.role);
+  console.log("Password change required on next login:", admin.isPasswordChangeRequired);
   console.log("==================================");
 };
 
 seedAdmin()
   .catch((error) => {
-    console.error("❌ Admin seed failed:", error.message);
+    console.error("Admin seed failed:", error.message);
     process.exitCode = 1;
   })
   .finally(async () => {
-    await mongoose.disconnect();
+    await mongoose.disconnect().catch(() => {});
   });

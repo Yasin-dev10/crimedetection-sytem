@@ -19,6 +19,8 @@ const {
   sendPasswordResetOTPEmail,
 } = require("../services/emailService");
 const twilioVerify = require("../services/twilioVerifyService");
+const { validatePasswordStrength } = require("../utils/passwordPolicy");
+const { SENSITIVE_USER_FIELDS } = require("../utils/userSelect");
 
 const generateSessionId = () => crypto.randomBytes(16).toString("hex");
 
@@ -30,7 +32,30 @@ const generateToken = (user, sessionId = null) => {
   const payload = { id: user._id, role: user.role };
   if (sessionId) payload.sessionId = sessionId;
 
-  return jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: "7d" });
+  return jwt.sign(payload, process.env.JWT_SECRET, {
+    expiresIn: process.env.JWT_EXPIRES_IN || "12h",
+  });
+};
+
+const AUTH_COOKIE_OPTIONS = {
+  httpOnly: true,
+  sameSite: "lax",
+  secure: process.env.NODE_ENV === "production",
+  maxAge: 12 * 60 * 60 * 1000,
+  path: "/",
+};
+
+const setAuthCookie = (res, token) => {
+  res.cookie("token", token, AUTH_COOKIE_OPTIONS);
+};
+
+const clearAuthCookie = (res) => {
+  res.clearCookie("token", {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    path: "/",
+  });
 };
 
 const buildUserResponse = (user) => ({
@@ -51,6 +76,11 @@ const registerUser = async (req, res) => {
 
     if (!name || !email || !password) {
       return res.status(400).json({ message: "Name, email and password are required" });
+    }
+
+    const passwordCheck = validatePasswordStrength(password);
+    if (!passwordCheck.ok) {
+      return res.status(400).json({ message: passwordCheck.message });
     }
 
     const normalizedPhone = String(phone || "").replace(/\s+/g, "").trim();
@@ -109,10 +139,21 @@ const registerUser = async (req, res) => {
 
 const registerAdmin = async (req, res) => {
   try {
+    const bootstrapSecret = process.env.ADMIN_BOOTSTRAP_SECRET;
+    const providedSecret = req.headers["x-admin-bootstrap-secret"];
+    if (!bootstrapSecret || !providedSecret || providedSecret !== bootstrapSecret) {
+      return res.status(403).json({ message: "Admin registration is disabled" });
+    }
+
     const { name, email, password } = req.body;
 
     if (!name || !email || !password) {
       return res.status(400).json({ message: "Name, email and password are required" });
+    }
+
+    const passwordCheck = validatePasswordStrength(password);
+    if (!passwordCheck.ok) {
+      return res.status(400).json({ message: passwordCheck.message });
     }
 
     const normalizedEmail = email.trim().toLowerCase();
@@ -120,9 +161,14 @@ const registerAdmin = async (req, res) => {
 
     if (adminExists) {
       if (!adminExists.password && adminExists.email === normalizedEmail) {
+        const sessionId = generateSessionId();
         adminExists.name = name;
         adminExists.password = await bcrypt.hash(password, 10);
+        adminExists.activeSessionId = sessionId;
         await adminExists.save();
+
+        const token = generateToken(adminExists, sessionId);
+        setAuthCookie(res, token);
 
         return res.status(200).json({
           message: "Admin password configured successfully",
@@ -135,7 +181,7 @@ const registerAdmin = async (req, res) => {
             emailAlerts: adminExists.emailAlerts,
             pushNotifications: adminExists.pushNotifications,
           },
-          token: generateToken(adminExists),
+          token,
         });
       }
 
@@ -146,13 +192,18 @@ const registerAdmin = async (req, res) => {
     if (exists) return res.status(400).json({ message: "Email already exists" });
 
     const hashedPassword = await bcrypt.hash(password, 10);
+    const sessionId = generateSessionId();
 
     const admin = await User.create({
       name,
       email: normalizedEmail,
       password: hashedPassword,
       role: "admin",
+      activeSessionId: sessionId,
     });
+
+    const token = generateToken(admin, sessionId);
+    setAuthCookie(res, token);
 
     res.status(201).json({
       message: "Admin created successfully",
@@ -165,7 +216,7 @@ const registerAdmin = async (req, res) => {
         emailAlerts: admin.emailAlerts,
         pushNotifications: admin.pushNotifications,
       },
-      token: generateToken(admin),
+      token,
     });
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -261,7 +312,8 @@ const login = async (req, res) => {
       });
     }
 
-    if (!user.emailVerified && user.emailVerificationOTP) {
+    if (!user.emailVerified) {
+      await recordFailedLogin("email_unverified", user);
       return res.status(403).json({
         message: "Please verify your email before logging in.",
         requiresVerification: true,
@@ -269,12 +321,10 @@ const login = async (req, res) => {
       });
     }
 
-    if (user.role === "user" && !user.emailVerified) {
-      user.emailVerified = true;
-      await user.save();
-    }
-
-    if (user.role === "investigator" && !user.passwordChangedAt) {
+    if (
+      ["investigator", "dataset_manager"].includes(user.role) &&
+      !user.passwordChangedAt
+    ) {
       user.isPasswordChangeRequired = true;
       await user.save();
     }
@@ -337,9 +387,14 @@ const verifyLoginOTP = async (req, res) => {
 
     user.loginOTP = null;
     user.loginOTPExpiry = null;
-    await user.save();
 
     const sessionId = generateSessionId();
+    user.activeSessionId = sessionId;
+    await user.save();
+
+    const token = generateToken(user, sessionId);
+    setAuthCookie(res, token);
+
     await logActivity({
       req,
       user,
@@ -351,7 +406,7 @@ const verifyLoginOTP = async (req, res) => {
     res.json({
       message: "Login successful",
       user: buildUserResponse(user),
-      token: generateToken(user, sessionId),
+      token,
     });
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -396,7 +451,7 @@ const resendLoginOTP = async (req, res) => {
 
 const getMe = async (req, res) => {
   try {
-    const user = await User.findById(req.user._id).select("-password -emailVerificationToken -passwordChangeToken");
+    const user = await User.findById(req.user._id).select(SENSITIVE_USER_FIELDS);
     res.json({
       user: {
         ...user.toObject(),
@@ -451,7 +506,7 @@ const updateMe = async (req, res) => {
     const updatedUser = await User.findByIdAndUpdate(req.user._id, updates, {
       new: true,
       runValidators: true,
-    }).select("-password");
+    }).select(SENSITIVE_USER_FIELDS);
 
     res.json({
       message: "Settings updated successfully",
@@ -470,8 +525,9 @@ const changePassword = async (req, res) => {
       return res.status(400).json({ message: "Current and new password are required" });
     }
 
-    if (newPassword.length < 6) {
-      return res.status(400).json({ message: "Password must be at least 6 characters long" });
+    const passwordCheck = validatePasswordStrength(newPassword);
+    if (!passwordCheck.ok) {
+      return res.status(400).json({ message: passwordCheck.message });
     }
 
     const user = await User.findById(req.user._id);
@@ -488,7 +544,9 @@ const changePassword = async (req, res) => {
     user.password = await bcrypt.hash(newPassword, 10);
     user.isPasswordChangeRequired = false;
     user.passwordChangedAt = new Date();
+    user.activeSessionId = null;
     await user.save();
+    clearAuthCookie(res);
 
     await logActivity({
       req,
@@ -528,6 +586,11 @@ const createInvestigator = async (req, res) => {
 
     if (!name || !email || !password) {
       return res.status(400).json({ message: "Name, email and password are required" });
+    }
+
+    const passwordCheck = validatePasswordStrength(password);
+    if (!passwordCheck.ok) {
+      return res.status(400).json({ message: passwordCheck.message });
     }
 
     const normalizedEmail = email.trim().toLowerCase();
@@ -646,7 +709,7 @@ const verifyOTP = async (req, res) => {
     user.emailVerificationOTP = null;
     user.emailVerificationOTPExpiry = null;
 
-    if (user.role === "investigator" || user.role === "admin") {
+    if (["investigator", "admin", "dataset_manager"].includes(user.role)) {
       user.isPasswordChangeRequired = true;
       user.passwordChangedAt = null;
     }
@@ -671,6 +734,10 @@ const verifyOTP = async (req, res) => {
     if (user.role === "user") {
       // Registration OTP verification issues an immediate token — treat as a login
       const sessionId = generateSessionId();
+      user.activeSessionId = sessionId;
+      await user.save();
+      const token = generateToken(user, sessionId);
+      setAuthCookie(res, token);
       await logActivity({
         req,
         user,
@@ -678,7 +745,7 @@ const verifyOTP = async (req, res) => {
         sessionId,
         details: { method: "registration_otp" },
       });
-      response.token = generateToken(user, sessionId);
+      response.token = token;
     }
 
     res.json(response);
@@ -859,10 +926,9 @@ const resetPasswordWithOTP = async (req, res) => {
       });
     }
 
-    if (newPassword.length < 6) {
-      return res.status(400).json({
-        message: "Password must be at least 6 characters long",
-      });
+    const passwordCheck = validatePasswordStrength(newPassword);
+    if (!passwordCheck.ok) {
+      return res.status(400).json({ message: passwordCheck.message });
     }
 
     const user = await User.findOne({
@@ -882,6 +948,7 @@ const resetPasswordWithOTP = async (req, res) => {
     user.passwordResetOTPExpiry = null;
     user.isPasswordChangeRequired = false;
     user.passwordChangedAt = new Date();
+    user.activeSessionId = null;
     await user.save();
 
     res.json({
@@ -945,10 +1012,9 @@ const changePasswordWithVerification = async (req, res) => {
         .json({ message: "Token and new password are required" });
     }
 
-    if (newPassword.length < 6) {
-      return res
-        .status(400)
-        .json({ message: "Password must be at least 6 characters long" });
+    const passwordCheck = validatePasswordStrength(newPassword);
+    if (!passwordCheck.ok) {
+      return res.status(400).json({ message: passwordCheck.message });
     }
 
     const user = await User.findOne({
@@ -968,6 +1034,7 @@ const changePasswordWithVerification = async (req, res) => {
     user.passwordChangeTokenExpiry = null;
     user.isPasswordChangeRequired = false;
     user.passwordChangedAt = new Date();
+    user.activeSessionId = null;
     await user.save();
 
     res.json({
@@ -1063,9 +1130,15 @@ const verifyPhone = async (req, res) => {
   }
 };
 
-// Log the user out (stateless JWT — records the logout event for activity reports)
+// Invalidate the current server-side session and clear auth cookie
 const logout = async (req, res) => {
   try {
+    if (req.user?._id) {
+      await User.findByIdAndUpdate(req.user._id, { activeSessionId: null });
+    }
+
+    clearAuthCookie(res);
+
     await logActivity({
       req,
       user: req.user,
@@ -1075,7 +1148,7 @@ const logout = async (req, res) => {
 
     res.json({ message: "Logged out successfully" });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    res.status(500).json({ message: "Logout failed" });
   }
 };
 

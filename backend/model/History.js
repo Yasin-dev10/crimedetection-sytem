@@ -53,6 +53,11 @@ const historySchema = new mongoose.Schema(
       sparse: true,
     },
 
+    publishedAt: {
+      type: Date,
+      default: null,
+    },
+
     authorName: {
       type: String,
       default: null,

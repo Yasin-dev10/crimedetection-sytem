@@ -101,6 +101,7 @@ def main():
     df["text"] = df["text"].str.strip()
 
     # Clear dataset-linked EDA charts
+    charts.plot_dataset_sources(df, OUTPUT_DIR / "00a_dataset_sources.png")
     n_before = len(df)
     n_dupes = int(df.duplicated(subset=["text"]).sum())
     charts.plot_duplicates(

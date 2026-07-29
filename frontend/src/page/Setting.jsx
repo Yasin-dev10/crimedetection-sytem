@@ -9,6 +9,7 @@ export default function SettingsPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [userRole, setUserRole] = useState("user");
 
   const [form, setForm] = useState({
     name: "",
@@ -48,6 +49,7 @@ export default function SettingsPage() {
         const res = await API.get("/auth/me");
         const user = res.data.user;
         const theme = user.theme || localStorage.getItem("theme") || "dark";
+        setUserRole(user.role || "user");
 
         setForm({
           name: user.name || "",
@@ -266,18 +268,22 @@ export default function SettingsPage() {
                         }}
                       />
 
-                      <Field
-                        label="Badge Number"
-                        value={form.badgeNumber}
-                        onChange={(value) => updateField("badgeNumber", value)}
-                      />
+                      {(userRole === "admin" || userRole === "investigator") && (
+                        <>
+                          <Field
+                            label="Badge Number"
+                            value={form.badgeNumber}
+                            onChange={(value) => updateField("badgeNumber", value)}
+                          />
 
-                      <Field
-                        label="Investigator Station"
-                        value={form.station}
-                        onChange={(value) => updateField("station", value)}
-                        className="sm:col-span-2"
-                      />
+                          <Field
+                            label="Investigator Station"
+                            value={form.station}
+                            onChange={(value) => updateField("station", value)}
+                            className="sm:col-span-2"
+                          />
+                        </>
+                      )}
                     </div>
 
                     <div

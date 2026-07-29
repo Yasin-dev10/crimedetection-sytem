@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import Swal from "sweetalert2";
-import API from "../api";
+import API, { storeSession } from "../api";
 import { applyTheme } from "../theme";
 import {
   AuthPage,
@@ -44,12 +44,12 @@ export default function LoginPage() {
   const getHomePath = (role) => {
     if (role === "admin") return "/dashboard";
     if (role === "investigator") return "/cases";
-    return "/analysis";
+    if (role === "dataset_manager") return "/dataset";
+    return "/dashboard";
   };
 
   const finishLogin = (user, token, loginPassword) => {
-    localStorage.setItem("token", token);
-    localStorage.setItem("user", JSON.stringify(user));
+    storeSession({ token, user });
     applyTheme(user.theme, { updateUser: true, emit: false });
 
     if (user.isPasswordChangeRequired) {

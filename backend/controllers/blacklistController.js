@@ -3,6 +3,7 @@ const BlacklistItem = require("../model/BlacklistItem");
 const History = require("../model/History");
 const InvestigationCase = require("../model/InvestigationCase");
 const User = require("../model/user");
+const mongoose = require("mongoose");
 const axios = require("axios");
 const cheerio = require("cheerio");
 
@@ -27,6 +28,18 @@ const {
   buildFakeCrimeSubjects,
 } = require("../services/fakeCrimeReportService");
 const { logActivity } = require("../utils/activityLogger");
+
+const getScanPeriodOptions = (value) => {
+  const period = ["week", "month", "year"].includes(value) ? value : "week";
+  const days = period === "year" ? 365 : period === "month" ? 30 : 7;
+  const until = new Date();
+
+  return {
+    period,
+    since: new Date(until.getTime() - days * 24 * 60 * 60 * 1000),
+    until,
+  };
+};
 
 const normalizeBlacklistValue = (value = "") =>
   String(value).trim().replace(/\/+$/, "").toLowerCase();
@@ -108,7 +121,8 @@ const getNameFromFacebookUrl = (url = "") => {
 const fetchFacebookProfileName = async (url) => {
   const response = await axios.get(url, {
     timeout: 12000,
-    maxRedirects: 5,
+    maxRedirects: 0,
+    validateStatus: (status) => status >= 200 && status < 300,
     headers: {
       "User-Agent":
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36",
@@ -257,8 +271,11 @@ const createBlacklistItem = async (req, res) => {
 
 const updateBlacklistItem = async (req, res) => {
   try {
-    const updates = { ...req.body };
-    delete updates.priority;
+    const allowed = ["name", "value", "type", "reason", "notes", "isActive", "status"];
+    const updates = {};
+    for (const key of allowed) {
+      if (req.body[key] !== undefined) updates[key] = req.body[key];
+    }
 
     const current = await BlacklistItem.findById(req.params.id);
 
@@ -559,7 +576,8 @@ const getBlacklistItemDetails = async (req, res) => {
 
 const scanFacebookBlacklist = async (req, res) => {
   try {
-    const results = await scanFacebookWatchlist();
+    const options = getScanPeriodOptions(req.body?.period);
+    const results = await scanFacebookWatchlist(options);
 
     res.json({
       message: "Facebook watchlist scan completed",
@@ -586,7 +604,8 @@ const scanSingleFacebookBlacklist = async (req, res) => {
       });
     }
 
-    const result = await scanFacebookItem(item);
+    const options = getScanPeriodOptions(req.body?.period);
+    const result = await scanFacebookItem(item, options);
 
     res.json({
       message: "Facebook page scan completed",
@@ -602,7 +621,8 @@ const scanSingleFacebookBlacklist = async (req, res) => {
 
 const scanWebsiteBlacklist = async (req, res) => {
   try {
-    const results = await scanWebsiteWatchlist();
+    const options = getScanPeriodOptions(req.body?.period);
+    const results = await scanWebsiteWatchlist(options);
 
     res.json({
       message: "Website watchlist scan completed",
@@ -629,7 +649,8 @@ const scanSingleWebsiteBlacklist = async (req, res) => {
       });
     }
 
-    const result = await scanWebsiteItem(item);
+    const options = getScanPeriodOptions(req.body?.period);
+    const result = await scanWebsiteItem(item, options);
 
     res.json({
       message: "Website scan completed",
@@ -706,6 +727,60 @@ const getWebsitePages = async (req, res) => {
 
     res.status(error.status || 500).json({
       message: "Failed to fetch website pages",
+      error: error.message,
+    });
+  }
+};
+
+const getWebsitePageById = async (req, res) => {
+  try {
+    const item = await BlacklistItem.findOne({
+      _id: req.params.id,
+      type: "website",
+    }).lean();
+
+    if (!item) {
+      return res.status(404).json({
+        message: "Website blacklist item not found",
+      });
+    }
+
+    const pageId = String(req.params.pageId || "").trim();
+    const identifiers = [{ postId: pageId }];
+
+    if (mongoose.Types.ObjectId.isValid(pageId)) {
+      identifiers.push({ _id: pageId });
+    }
+
+    const page = await History.findOne({
+      sourceType: "website",
+      "blacklistMatches.item": item._id,
+      $or: identifiers,
+    }).lean();
+
+    if (!page) {
+      return res.status(404).json({
+        message: "Website post not found",
+      });
+    }
+
+    const linkedCase = await InvestigationCase.findOne({ history: page._id })
+      .select("status assignedOfficer")
+      .lean();
+
+    return res.json({
+      item,
+      page: {
+        ...page,
+        caseId: linkedCase?._id || null,
+        caseStatus: linkedCase?.status || null,
+      },
+    });
+  } catch (error) {
+    console.error("WEBSITE PAGE BY ID ERROR:", error);
+
+    return res.status(error.status || 500).json({
+      message: "Failed to fetch website post",
       error: error.message,
     });
   }
@@ -939,6 +1014,7 @@ module.exports = {
   scanWebsiteBlacklist,
   scanSingleWebsiteBlacklist,
   getWebsitePages,
+  getWebsitePageById,
   getFakeCrimeSubjects,
   getReportFlags,
   getBlacklistStats,
