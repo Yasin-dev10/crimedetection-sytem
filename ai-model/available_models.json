@@ -1,0 +1,48 @@
+{
+  "somberta-a": {
+    "backend": "transformer",
+    "path": "models/somberta-a",
+    "max_length": 128
+  },
+  "somberta-b": {
+    "backend": "transformer",
+    "path": "models/somberta-b",
+    "max_length": 256
+  },
+  "1d-cnn": {
+    "backend": "pytorch-word",
+    "path": "models/1d-cnn"
+  },
+  "bilstm": {
+    "backend": "pytorch-word",
+    "path": "models/bilstm"
+  },
+  "logistic-regression": {
+    "backend": "sklearn",
+    "path": "models/classical/logistic-regression"
+  },
+  "naive-bayes": {
+    "backend": "sklearn",
+    "path": "models/classical/naive-bayes"
+  },
+  "decision-tree": {
+    "backend": "sklearn",
+    "path": "models/classical/decision-tree"
+  },
+  "random-forest": {
+    "backend": "sklearn",
+    "path": "models/classical/random-forest"
+  },
+  "gradient-boosting": {
+    "backend": "sklearn",
+    "path": "models/classical/gradient-boosting"
+  },
+  "linear-svm": {
+    "backend": "sklearn",
+    "path": "models/classical/linear-svm"
+  },
+  "knn": {
+    "backend": "sklearn",
+    "path": "models/classical/knn"
+  }
+}

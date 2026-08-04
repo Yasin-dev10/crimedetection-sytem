@@ -311,6 +311,22 @@ python app.py
 - Confirm the AI service is running on `:5001` and `crime_model.pkl` / `vectorizer.pkl` exist in `ai-model/`.
 - Check `AI_MODEL_URL` in `backend/.env`.
 
+### Choosing a trained model
+
+The Colab notebook `model/Automatic_crime_Final_Thesis_Colab.ipynb` saves every
+trained model in one results ZIP. Extract that ZIP into `ai-model/artifacts`, then
+configure the AI service in `backend/.env`:
+
+```env
+AI_MODEL_ARTIFACT_DIR=C:/absolute/path/to/ai-model/artifacts
+AI_MODEL_NAME=somberta-b
+```
+
+`AI_MODEL_NAME` may be `somberta-a`, `somberta-b`, `1d-cnn`, `bilstm`, or one of
+the classical names listed in the generated `available_models.json`. If the
+variable is omitted, the service uses `active_model.json`; legacy `.pkl` files
+remain supported when neither configuration file exists.
+
 **Cannot connect to MongoDB**
 
 - Verify `MONGO_URI` and that MongoDB is running.

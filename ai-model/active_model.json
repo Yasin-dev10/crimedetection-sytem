@@ -1,0 +1,6 @@
+{
+  "selected_model": "somberta-b",
+  "backend": "transformer",
+  "path": "models/somberta-b",
+  "max_length": 256
+}

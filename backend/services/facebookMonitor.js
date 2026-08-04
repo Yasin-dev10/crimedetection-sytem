@@ -44,6 +44,50 @@ const CRIME_KEYWORDS = [
 const fingerprint = (value) =>
   crypto.createHash("sha256").update(String(value || "")).digest("hex");
 
+const parseFacebookDate = (value, now = new Date()) => {
+  const raw = String(value || "")
+    .replace(/\s+/g, " ")
+    .replace(/\s*[·•]\s*(Public|Friends|Shared with.*)$/i, "")
+    .trim();
+  if (!raw) return null;
+
+  const relative = raw.match(
+    /^(\d+)\s*(m|min|mins|minute|minutes|h|hr|hrs|hour|hours|d|day|days|w|week|weeks|daqiiqo|saac|saacadood|maalin|maalmood|todobaad)/i
+  );
+  if (relative) {
+    const amount = Number(relative[1]);
+    const unit = relative[2].toLowerCase();
+    const milliseconds =
+      /^(m|min|mins|minute|minutes|daqiiqo)$/.test(unit)
+        ? 60 * 1000
+        : /^(h|hr|hrs|hour|hours|saac|saacadood)$/.test(unit)
+        ? 60 * 60 * 1000
+        : /^(w|week|weeks|todobaad)$/.test(unit)
+        ? 7 * 24 * 60 * 60 * 1000
+        : 24 * 60 * 60 * 1000;
+    return new Date(now.getTime() - amount * milliseconds);
+  }
+
+  if (/^(yesterday|shalay)/i.test(raw)) {
+    return new Date(now.getTime() - 24 * 60 * 60 * 1000);
+  }
+  if (/^(today|maanta|just now)/i.test(raw)) return now;
+
+  const normalized = raw.replace(/\bat\b/i, "").replace(/\s*[·•].*$/, "").trim();
+  let parsed = new Date(normalized);
+  if (Number.isNaN(parsed.getTime())) {
+    parsed = new Date(`${normalized} ${now.getFullYear()}`);
+  }
+  if (Number.isNaN(parsed.getTime())) return null;
+
+  // Facebook omits the year for recent posts. Avoid interpreting a future
+  // month/day as belonging to next year.
+  if (!/\b\d{4}\b/.test(normalized) && parsed > now) {
+    parsed.setFullYear(parsed.getFullYear() - 1);
+  }
+  return parsed;
+};
+
 const checkCrimeText = (text) => {
   const lower = String(text || "").toLowerCase();
   const matched = CRIME_KEYWORDS.find((w) => lower.includes(w));
@@ -221,6 +265,71 @@ const analyzeFacebookPost = async ({ item, post }) => {
   }
 };
 
+const getFacebookPageHandle = (pageUrl = "") => {
+  try {
+    const parsed = new URL(String(pageUrl).trim());
+    const [handle] = parsed.pathname.split("/").filter(Boolean);
+    if (!handle || /^(pages|profile\.php|groups|watch)$/i.test(handle)) return null;
+    return handle;
+  } catch {
+    return null;
+  }
+};
+
+// Prefer Facebook's API when configured. Unlike DOM scraping it supplies a
+// canonical created_time, so week/month/year scans can be date-accurate even
+// when Facebook hides the public feed behind a login dialog.
+const fetchFacebookGraphPosts = async (pageUrl, options = {}) => {
+  const accessToken = String(process.env.FACEBOOK_ACCESS_TOKEN || "").trim();
+  const handle = getFacebookPageHandle(pageUrl);
+  if (!accessToken || !handle) return null;
+
+  try {
+    const params = {
+      access_token: accessToken,
+      fields: "id,message,created_time,permalink_url,from",
+      limit: 100,
+    };
+    if (options.since) {
+      params.since = Math.floor(new Date(options.since).getTime() / 1000);
+    }
+    if (options.until) {
+      params.until = Math.floor(new Date(options.until).getTime() / 1000);
+    }
+
+    const posts = [];
+    let nextUrl = `https://graph.facebook.com/${encodeURIComponent(handle)}/posts`;
+    let nextParams = params;
+    const maxPages = options.period === "year" ? 20 : 8;
+
+    for (let pageNumber = 0; nextUrl && pageNumber < maxPages; pageNumber += 1) {
+      const response = await axios.get(nextUrl, {
+        params: nextParams,
+        timeout: 20000,
+      });
+      const rows = Array.isArray(response.data?.data) ? response.data.data : [];
+      rows.forEach((row) => {
+        if (!String(row.message || "").trim() || !row.created_time) return;
+        posts.push({
+          message: row.message,
+          authorName: row.from?.name || "",
+          url: row.permalink_url || pageUrl,
+          publishedAt: row.created_time,
+        });
+      });
+      nextUrl = response.data?.paging?.next || null;
+      nextParams = undefined;
+    }
+
+    console.log(`Facebook Graph API posts found: ${posts.length}`);
+    return posts;
+  } catch (error) {
+    const graphMessage = error.response?.data?.error?.message || error.message;
+    console.warn(`Facebook Graph API unavailable for ${handle}: ${graphMessage}`);
+    return null;
+  }
+};
+
 const scrapeFacebookPosts = async (pageUrl, options = {}) => {
   let browser;
 
@@ -250,17 +359,22 @@ const scrapeFacebookPosts = async (pageUrl, options = {}) => {
     await page.setUserAgent(
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36"
     );
+    await page.setExtraHTTPHeaders({ "Accept-Language": "en-US,en;q=0.9" });
 
     console.log("Opening Facebook page:", pageUrl);
 
+    // Facebook keeps analytics/chat connections open indefinitely, so
+    // `networkidle2` can make an otherwise healthy manual scan look frozen.
+    // DOM readiness is enough for the feed; the short settle delay below lets
+    // client-rendered articles appear without blocking the API for minutes.
     await page.goto(pageUrl, {
-      waitUntil: "networkidle2",
-      timeout: 120000,
+      waitUntil: "domcontentloaded",
+      timeout: 30000,
     });
 
     console.log("Facebook page loaded");
 
-    await new Promise((resolve) => setTimeout(resolve, 8000));
+    await new Promise((resolve) => setTimeout(resolve, 3500));
 
     // Facebook virtualizes its feed: after scrolling, older articles are often
     // removed from the DOM. Collect every visible batch while scrolling instead
@@ -292,16 +406,32 @@ const scrapeFacebookPosts = async (pageUrl, options = {}) => {
             article.querySelector("time[datetime]") ||
             article.querySelector("abbr[data-utime]") ||
             article.querySelector("[data-utime]");
+          const labelledDateElement = Array.from(
+            article.querySelectorAll("a[aria-label], a[title], span[aria-label]")
+          ).find((element) => {
+            const label = `${element.getAttribute("aria-label") || ""} ${
+              element.getAttribute("title") || ""
+            }`.trim();
+            return /(?:\d+\s*(?:m|h|d|w|min|hr|day|week)|yesterday|today|\b20\d{2}\b|january|february|march|april|may|june|july|august|september|october|november|december)/i.test(label);
+          });
           const unixTime = timeElement?.getAttribute("data-utime");
           const publishedAt = unixTime
             ? new Date(Number(unixTime) * 1000).toISOString()
             : timeElement?.getAttribute("datetime") || null;
+          const dateText =
+            timeElement?.getAttribute("aria-label") ||
+            timeElement?.getAttribute("title") ||
+            labelledDateElement?.getAttribute("aria-label") ||
+            labelledDateElement?.getAttribute("title") ||
+            labelledDateElement?.textContent ||
+            "";
 
           results.push({
             message: text.replace(/\s+/g, " ").trim(),
             authorName: authorName.replace(/\s+/g, " ").trim(),
             url: link ? link.href : window.location.href,
             publishedAt,
+            dateText: dateText.trim(),
           });
         });
 
@@ -309,6 +439,9 @@ const scrapeFacebookPosts = async (pageUrl, options = {}) => {
       });
 
       visiblePosts.forEach((post) => {
+        if (!post.publishedAt && post.dateText) {
+          post.publishedAt = parseFacebookDate(post.dateText)?.toISOString() || null;
+        }
         const hasPostPermalink =
           /\/(posts|videos|reel)\//i.test(post.url || "") ||
           /[?&]story_fbid=/i.test(post.url || "");
@@ -322,7 +455,10 @@ const scrapeFacebookPosts = async (pageUrl, options = {}) => {
     await collectVisiblePosts();
 
     const maxScrolls =
-      options.period === "year" ? 120 : options.period === "month" ? 45 : 18;
+      options.period === "year" ? 60 : options.period === "month" ? 36 : 18;
+    // Keep a single-item request within a predictable time even when Facebook
+    // continuously extends the page or does not expose usable timestamps.
+    const scrollDeadline = Date.now() + 45000;
     const sinceTime = options.since
       ? new Date(options.since).getTime()
       : null;
@@ -330,30 +466,19 @@ const scrapeFacebookPosts = async (pageUrl, options = {}) => {
     let previousHeight = 0;
 
     for (let i = 0; i < maxScrolls; i += 1) {
+      if (Date.now() >= scrollDeadline) break;
       await page.evaluate(() => window.scrollBy(0, 2000));
-      await new Promise((resolve) => setTimeout(resolve, 1500));
+      await new Promise((resolve) => setTimeout(resolve, 900));
       await collectVisiblePosts();
 
-      const scrollState = await page.evaluate(() => {
-        const times = Array.from(
-          document.querySelectorAll(
-            "div[role='article'] time[datetime], div[role='article'] [data-utime]"
-          )
-        )
-          .map((element) => {
-            const unixTime = element.getAttribute("data-utime");
-            const value = unixTime
-              ? Number(unixTime) * 1000
-              : Date.parse(element.getAttribute("datetime") || "");
-            return Number.isFinite(value) ? value : null;
-          })
-          .filter((value) => value !== null);
-
-        return {
-          height: document.documentElement.scrollHeight,
-          oldestTime: times.length ? Math.min(...times) : null,
-        };
-      });
+      const height = await page.evaluate(() => document.documentElement.scrollHeight);
+      const knownTimes = Array.from(collectedPosts.values())
+        .map((post) => Date.parse(post.publishedAt || ""))
+        .filter(Number.isFinite);
+      const scrollState = {
+        height,
+        oldestTime: knownTimes.length ? Math.min(...knownTimes) : null,
+      };
 
       unchangedScrolls =
         scrollState.height === previousHeight ? unchangedScrolls + 1 : 0;
@@ -361,13 +486,30 @@ const scrapeFacebookPosts = async (pageUrl, options = {}) => {
 
       if (
         (sinceTime && scrollState.oldestTime && scrollState.oldestTime <= sinceTime) ||
-        unchangedScrolls >= 3
+        unchangedScrolls >= 3 ||
+        (collectedPosts.size === 0 && i >= 4)
       ) {
         break;
       }
     }
 
     const posts = Array.from(collectedPosts.values());
+
+    if (posts.length === 0) {
+      const accessState = await page.evaluate(() => {
+        const body = document.body?.innerText || "";
+        return {
+          loginRequired: /\bLog In\b/i.test(body) && /\bFriends\b/i.test(body),
+          unavailable: /content isn't available|page isn't available/i.test(body),
+        };
+      });
+      if (accessState.loginRequired) {
+        posts.scrapeWarning =
+          "Facebook login is required for this personal/private profile; public posts were not exposed.";
+      } else if (accessState.unavailable) {
+        posts.scrapeWarning = "Facebook reports that this page is unavailable.";
+      }
+    }
 
     console.log("Posts found:", posts.length);
     return posts;
@@ -381,15 +523,16 @@ const scrapeFacebookPosts = async (pageUrl, options = {}) => {
 
 const scanFacebookItem = async (item, options = {}) => {
   try {
-    const posts = await scrapeFacebookPosts(item.value, options);
+    const graphPosts = await fetchFacebookGraphPosts(item.value, options);
+    const posts = graphPosts ?? (await scrapeFacebookPosts(item.value, options));
+    const source = graphPosts !== null ? "graph-api" : "browser";
     const since = options.since ? new Date(options.since) : null;
     const until = options.until ? new Date(options.until) : new Date();
     const periodPosts = since
       ? posts.filter((post) => {
-          // Facebook frequently hides the machine-readable timestamp. Keep
-          // those posts so they are not silently lost; postId deduplication
-          // prevents them from being stored again on later scans.
-          if (!post.publishedAt) return true;
+          // A period scan must be governed by the post date. Unknown dates are
+          // excluded instead of leaking into Last Week/Month/Year results.
+          if (!post.publishedAt) return false;
           const publishedAt = new Date(post.publishedAt);
           return (
             !Number.isNaN(publishedAt.getTime()) &&
@@ -398,6 +541,10 @@ const scanFacebookItem = async (item, options = {}) => {
           );
         })
       : posts;
+    const datedPosts = posts.filter((post) => {
+      const time = Date.parse(post.publishedAt || "");
+      return Number.isFinite(time);
+    }).length;
 
     let scanned = periodPosts.length;
     let alerts = 0;
@@ -419,6 +566,12 @@ const scanFacebookItem = async (item, options = {}) => {
       period: options.period || null,
       since,
       until,
+      source,
+      totalFound: posts.length,
+      datedPosts,
+      undatedPosts: posts.length - datedPosts,
+      configurationWarning:
+        posts.scrapeWarning || null,
     };
   } catch (error) {
     console.error("Scan Facebook item error:", error.message);
@@ -501,4 +654,8 @@ module.exports = {
   scanFacebookWatchlist,
   scanFacebookItem,
   checkCrimeText,
+  parseFacebookDate,
+  getFacebookPageHandle,
+  fetchFacebookGraphPosts,
+  scrapeFacebookPosts,
 };

@@ -1,7 +1,6 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import hashlib
-import joblib
 import os
 import re
 from functools import wraps
@@ -9,6 +8,7 @@ from pathlib import Path
 
 from preprocessing import preprocess_text
 from crime_rules import find_explicit_crime_event, has_non_event_context
+from model_runtime import ModelRuntime
 from somali_language import assert_somali_only
 
 
@@ -42,8 +42,6 @@ AI_MODEL_API_KEY = (os.getenv("AI_MODEL_API_KEY") or "").strip()
 EXPECTED_MODEL_SHA256 = (os.getenv("AI_MODEL_SHA256") or "").strip().lower()
 
 TRAINING_DIR = MODEL_DIR.parent / "model"
-MODEL_PATH = MODEL_DIR / "crime_model.pkl"
-VECTORIZER_PATH = MODEL_DIR / "vectorizer.pkl"
 
 
 def file_sha256(path: Path) -> str:
@@ -54,14 +52,12 @@ def file_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-MODEL_SHA256 = file_sha256(MODEL_PATH)
+runtime = ModelRuntime(MODEL_DIR)
+MODEL_SHA256 = file_sha256(runtime.model_file)
 if EXPECTED_MODEL_SHA256 and MODEL_SHA256 != EXPECTED_MODEL_SHA256:
     raise RuntimeError(
         "Model integrity check failed. Update AI_MODEL_SHA256 or restore crime_model.pkl."
     )
-
-model = joblib.load(MODEL_PATH)
-vectorizer = joblib.load(VECTORIZER_PATH)
 
 SOMALI_LOCATIONS = [
     {"district_or_city": "hodan", "city": "muqdisho", "region": "banaadir"},
@@ -153,15 +149,7 @@ def make_response(text):
     explicit_event = find_explicit_crime_event(text)
 
     processed = preprocess_text(text)
-    vector = vectorizer.transform([processed])
-    prediction = str(model.predict(vector)[0])
-    confidence = 90.0
-
-    if hasattr(model, "predict_proba"):
-        confidence = round(max(model.predict_proba(vector)[0]) * 100, 2)
-    elif hasattr(model, "decision_function"):
-        score = float(model.decision_function(vector)[0])
-        confidence = round(min(99.0, max(50.0, 50.0 + abs(score) * 10.0)), 2)
+    prediction, confidence = runtime.predict(text, processed)
 
     # Decision comes from the ML model only.
     # Keywords are detected afterwards for marking / evidence labels — they do not override.
@@ -193,6 +181,8 @@ def make_response(text):
         "location": locations,
         "locations": locations,
         "model_loaded": True,
+        "modelName": runtime.selected_name,
+        "modelBackend": runtime.backend,
         "decisionSource": decision_source,
         "decision": "CRIME" if is_crime else "NOT_CRIME",
     }
@@ -204,6 +194,9 @@ def health():
         "status": "ok",
         "message": "AI Model Running",
         "modelLoaded": True,
+        "modelName": runtime.selected_name,
+        "modelBackend": runtime.backend,
+        "modelIntegrity": MODEL_SHA256[:12],
     })
 
 
@@ -216,6 +209,8 @@ def model_info():
         "features": ["text", "url", "file", "batch"],
         "predictEndpoint": "/predict",
         "modelIntegrity": MODEL_SHA256[:12],
+        "modelName": runtime.selected_name,
+        "modelBackend": runtime.backend,
     })
 
 

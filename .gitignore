@@ -18,6 +18,11 @@ out/
 *.log
 logs/
 
+# Large local AI model weights (GitHub rejects files over 100 MB)
+ai-model/models/**/model.safetensors
+ai-model/models/**/pytorch_model.bin
+ai-model/models/**/model.pt
+
 # Collected runtime dataset (auto-saved from analyses)
 model/collected_dataset.xlsx
 model/collected_dataset.csv

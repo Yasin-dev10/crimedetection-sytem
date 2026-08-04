@@ -1,0 +1,13 @@
+[
+  {
+    "Accuracy":0.9454976303,
+    "Precision":0.945680204,
+    "Recall":0.9454976303,
+    "F1":0.9455406902,
+    "Crime Recall":0.9448373409,
+    "Model":"SomBERTa-B",
+    "Family":"Encoder-only Transformer",
+    "Training seconds":1084.0230472088,
+    "Mode":"full: train=5906, epochs=4"
+  }
+]

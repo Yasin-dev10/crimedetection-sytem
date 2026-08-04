@@ -299,11 +299,38 @@ const normalizeWhitespace = (value = "") =>
 
 const extractPageContent = (html = "") => {
   const $ = cheerio.load(String(html || ""));
+  let jsonLdPublished = null;
+  $("script[type='application/ld+json']").each((_, element) => {
+    if (jsonLdPublished) return;
+    try {
+      const parsed = JSON.parse($(element).html() || "null");
+      const queue = Array.isArray(parsed) ? parsed : [parsed];
+      while (queue.length) {
+        const entry = queue.shift();
+        if (!entry || typeof entry !== "object") continue;
+        if (entry.datePublished || entry.dateCreated) {
+          jsonLdPublished = entry.datePublished || entry.dateCreated;
+          break;
+        }
+        if (Array.isArray(entry["@graph"])) queue.push(...entry["@graph"]);
+      }
+    } catch {
+      // Ignore invalid structured data and continue with HTML metadata.
+    }
+  });
+
   const publishedValue =
     $("meta[property='article:published_time']").attr("content") ||
+    $("meta[property='og:published_time']").attr("content") ||
     $("meta[name='date']").attr("content") ||
     $("meta[name='pubdate']").attr("content") ||
+    $("meta[name='publish-date']").attr("content") ||
+    $("meta[name='publication_date']").attr("content") ||
+    $("meta[itemprop='datePublished']").attr("content") ||
+    $("[itemprop='datePublished']").first().attr("datetime") ||
+    $("[itemprop='datePublished']").first().attr("content") ||
     $("time[datetime]").first().attr("datetime") ||
+    jsonLdPublished ||
     null;
   const parsedPublishedAt = publishedValue ? new Date(publishedValue) : null;
   const publishedAt =
@@ -619,6 +646,7 @@ const scanWebsiteItem = async (item, options = {}) => {
     since: options.since || null,
     until: options.until || null,
     skippedOutsidePeriod: 0,
+    matchedInPeriod: 0,
   };
 
   if (!item || item.type !== "website") {
@@ -707,6 +735,7 @@ const scanWebsiteItem = async (item, options = {}) => {
         if (analysis?.created) result.newRecords += 1;
         if (analysis?.alertCreated) result.alerts += 1;
         if (analysis?.skippedPeriod) result.skippedOutsidePeriod += 1;
+        if (analysis && !analysis.skippedPeriod) result.matchedInPeriod += 1;
         if (analysis?.skippedLanguage) {
           result.skippedLanguage = true;
           result.languageReason = analysis.languageReason || "not_somali";
@@ -716,14 +745,15 @@ const scanWebsiteItem = async (item, options = {}) => {
       }
     }
 
+    const periodLabel = options.period ? ` (${options.period})` : "";
     const statusText =
       result.newRecords > 0
-        ? `scraped ${result.newRecords} news, alerts ${result.alerts}`
+        ? `scraped ${result.newRecords} news${periodLabel}, alerts ${result.alerts}`
         : result.skippedLanguage
         ? `skipped-language: ${result.languageReason}`
         : result.errors.length
         ? `error: ${result.errors[0].slice(0, 180)}`
-        : "no new news scraped";
+        : `no dated news found${periodLabel}`;
 
     await BlacklistItem.findByIdAndUpdate(item._id, {
       lastScannedAt: new Date(),

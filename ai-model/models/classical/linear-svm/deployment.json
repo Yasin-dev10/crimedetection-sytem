@@ -1,0 +1,6 @@
+{
+  "backend": "sklearn",
+  "model_name": "Linear SVM",
+  "model_file": "model.pkl",
+  "vectorizer_file": "vectorizer.pkl"
+}

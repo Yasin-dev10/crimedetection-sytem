@@ -1,0 +1,9 @@
+{
+  "backend": "transformer",
+  "model_name": "SomBERTa-B",
+  "max_length": 256,
+  "labels": {
+    "not crime-related": 0,
+    "crime-related": 1
+  }
+}

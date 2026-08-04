@@ -321,17 +321,29 @@ export default function Blacklist() {
       setScanningId(id);
       setError("");
       setSuccess("");
-      await API.post(
+      const res = await API.post(
         isWebsite
           ? `/blacklist/website/scan/${id}`
           : `/blacklist/facebook/scan/${id}`,
         { period: scanPeriod }
       );
       await loadBlacklist();
+      const scanned = Number(
+        isWebsite
+          ? res.data?.result?.matchedInPeriod || 0
+          : res.data?.result?.scanned || 0
+      );
+      const facebookWarning = res.data?.result?.configurationWarning;
       setSuccess(
         isWebsite
-          ? "Website scanned. New Somali articles are available in Results and Notifications."
-          : "Page scanned. Open posts or Notifications to send crime content to Case Management."
+          ? scanned > 0
+            ? `Website scanned by date. ${scanned} page(s) found in the selected period.`
+            : "Scan completed, but no dated website pages were found in the selected period."
+          : scanned > 0
+          ? `Page scanned by date. ${scanned} post(s) found in the selected period.`
+          : facebookWarning
+          ? facebookWarning
+          : "Scan completed, but no dated Facebook posts were found in the selected period."
       );
     } catch (err) {
       setError(

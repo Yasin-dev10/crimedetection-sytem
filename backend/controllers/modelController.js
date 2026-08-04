@@ -16,6 +16,9 @@ const getModelInfo = async (req, res) => {
       message: response.data?.message || "AI Model Running",
       latencyMs: Date.now() - startedAt,
       features: ["text", "url", "file", "batch"],
+      modelName: response.data?.modelName || null,
+      modelBackend: response.data?.modelBackend || null,
+      modelIntegrity: response.data?.modelIntegrity || null,
     });
   } catch (error) {
     console.error("MODEL INFO ERROR:", error.message);

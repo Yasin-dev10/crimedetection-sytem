@@ -1,0 +1,9 @@
+[
+  {
+    "Model":"Linear SVM",
+    "Accuracy":0.9170616114,
+    "F1":0.9169515237,
+    "Crime Precision":0.9180555556,
+    "Crime Recall":0.9349363508
+  }
+]
