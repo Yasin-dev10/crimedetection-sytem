@@ -8,6 +8,7 @@ from functools import wraps
 from pathlib import Path
 
 from preprocessing import preprocess_text
+from crime_rules import find_explicit_crime_event, has_non_event_context
 from somali_language import assert_somali_only
 
 
@@ -149,6 +150,7 @@ def find_crime_keyword(text):
 def make_response(text):
     locations = find_locations(text)
     matched_keyword = find_crime_keyword(text)
+    explicit_event = find_explicit_crime_event(text)
 
     processed = preprocess_text(text)
     vector = vectorizer.transform([processed])
@@ -164,7 +166,16 @@ def make_response(text):
     # Decision comes from the ML model only.
     # Keywords are detected afterwards for marking / evidence labels — they do not override.
     model_is_crime = is_crime_prediction(prediction)
-    is_crime = model_is_crime
+    non_event_context = has_non_event_context(text)
+    is_crime = model_is_crime or explicit_event is not None
+    decision_source = "model"
+    if explicit_event is not None and not model_is_crime:
+        decision_source = "explicit-crime-event"
+        confidence = 92.0
+    elif non_event_context:
+        is_crime = False
+        decision_source = "non-event-context"
+        confidence = 95.0
 
     normalized_prediction = "crime-related" if is_crime else "not crime-related"
 
@@ -178,10 +189,11 @@ def make_response(text):
         "matchedKeyword": matched_keyword,
         "matched_keyword": matched_keyword,
         "keywordMarked": matched_keyword is not None,
+        "explicitCrimeEvent": explicit_event,
         "location": locations,
         "locations": locations,
         "model_loaded": True,
-        "decisionSource": "model",
+        "decisionSource": decision_source,
         "decision": "CRIME" if is_crime else "NOT_CRIME",
     }
 

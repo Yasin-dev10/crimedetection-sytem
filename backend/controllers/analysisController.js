@@ -215,7 +215,6 @@ const resultWithSavedDecision = (result, saved, extra = {}) => {
     is_crime: isCrime,
     decision: isCrime ? "CRIME" : "NOT_CRIME",
     blacklistMatches: saved.blacklistMatches,
-    priority: saved.priority,
   };
 };
 
@@ -249,14 +248,6 @@ const saveHistory = async ({ type, content, result, extractedText = "", userId =
     extractedText,
   });
 
-  const hasHighPriorityMatch = blacklistMatches.some(
-    (item) => item.priority === "high"
-  );
-
-  const priority = hasHighPriorityMatch
-    ? "high"
-    : blacklistMatches[0]?.priority || "normal";
-
   const resolvedUrl =
     url ||
     (type === "url" && /^https?:\/\//i.test(String(content || ""))
@@ -281,9 +272,7 @@ const saveHistory = async ({ type, content, result, extractedText = "", userId =
       item: item._id,
       type: item.type,
       value: item.value,
-      priority: item.priority,
     })),
-    priority,
     user: userId || null,
   });
 
@@ -298,7 +287,6 @@ const saveHistory = async ({ type, content, result, extractedText = "", userId =
           sourceType: type,
           content,
           matchedValue: item.value,
-          priority: item.priority,
           dedupeContent: `${type}:${content}:${extractedText}`,
         })
       )
@@ -314,7 +302,7 @@ const saveHistory = async ({ type, content, result, extractedText = "", userId =
     }
   }
 
-  return { history, blacklistMatches, priority };
+  return { history, blacklistMatches };
 };
 
 const analyzeText = async (req, res) => {

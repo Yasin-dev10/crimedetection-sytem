@@ -847,9 +847,6 @@ export default function Blacklist() {
                         <div className="flex flex-wrap items-center gap-2">
                           <h3 className="font-bold">{item.name}</h3>
                           <Badge color="cyan">{item.type}</Badge>
-                          {item.priority && (
-                            <Badge color="gray">{item.priority}</Badge>
-                          )}
                           <Badge color={item.active ? "cyan" : "gray"}>
                             {item.active ? "Active" : "Paused"}
                           </Badge>
@@ -928,9 +925,6 @@ function FacebookPageCard({
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <h3 className="text-base font-bold sm:text-lg">{item.name}</h3>
-            {item.priority && (
-              <Badge color="gray">{String(item.priority).toUpperCase()}</Badge>
-            )}
             <Badge color={item.active ? "cyan" : "gray"}>
               {item.active ? "Active" : "Paused"}
             </Badge>
@@ -1018,9 +1012,6 @@ function WebsiteCard({
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <h3 className="text-base font-bold sm:text-lg">{item.name}</h3>
-            {item.priority && (
-              <Badge color="gray">{String(item.priority).toUpperCase()}</Badge>
-            )}
             <Badge color={item.active ? "cyan" : "gray"}>
               {item.active ? "Active" : "Paused"}
             </Badge>

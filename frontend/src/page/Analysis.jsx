@@ -255,9 +255,9 @@ export default function Analysis({ publicMode = false, embedded = false }) {
   };
 
   const tabs = [
-    { key: "text", label: "Qoraal", icon: FileText },
+    { key: "text", label: "Text", icon: FileText },
     { key: "url", label: "URL", icon: LinkIcon },
-    { key: "file", label: "Fayl", icon: Upload },
+    { key: "file", label: "File", icon: Upload },
     { key: "batch", label: "Batch", icon: Layers },
   ];
 
@@ -287,11 +287,11 @@ export default function Analysis({ publicMode = false, embedded = false }) {
       {!embedded && (
         <div className="page-header">
           <div>
-            <h1 className="page-title">Falanqaynta Qoraalka Dambiga</h1>
+            <h1 className="page-title">Crime Text Analysis</h1>
             <p className="page-subtitle">
               {publicMode
-                ? "Geli qoraal Af Soomaali ah oo keliya. Ingiriis iyo luqadaha kale waa la diidaa."
-                : "Geli qoraal, URL, fayl, ama batch — Af Soomaali oo keliya ayaa la aqbalayaa."}
+                ? "Enter Somali text for crime analysis. English and other languages are not accepted."
+                : "Analyze text, a URL, a file, or a batch. Somali-language content only."}
             </p>
           </div>
           {user?.role === "dataset_manager" && (
@@ -364,7 +364,7 @@ export default function Analysis({ publicMode = false, embedded = false }) {
                 onChange={(e) => setText(e.target.value)}
                 required
                 rows="8"
-                placeholder="Geli qoraal Af Soomaali ah oo keliya (Ingiriis lama aqbalo)..."
+                placeholder="Enter Somali text only (English is not accepted)..."
                 className="w-full p-4 rounded-2xl border placeholder:opacity-50 focus:outline-none focus:ring-2 focus:ring-[var(--brand-ring)]"
                 style={fieldStyle}
               />
@@ -375,7 +375,7 @@ export default function Analysis({ publicMode = false, embedded = false }) {
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
                 required
-                placeholder="Geli URL bog Af Soomaali ah..."
+                placeholder="Enter the URL of a Somali-language page..."
                 className="w-full p-4 rounded-2xl border placeholder:opacity-50 focus:outline-none focus:ring-2 focus:ring-[var(--brand-ring)]"
                 style={fieldStyle}
               />
@@ -391,10 +391,10 @@ export default function Analysis({ publicMode = false, embedded = false }) {
               >
                 <Upload className="mb-3 brand-text" size={34} />
                 <h3 className="font-bold" style={{ color: "var(--text-primary)" }}>
-                  Soo geli fayl
+                  Upload a file
                 </h3>
                 <p className="text-sm mb-4" style={{ color: "var(--text-muted)" }}>
-                  Qoraalka gudaha waa inuu ahaadaa Af Soomaali. Faylasha: PDF, DOC, DOCX, TXT, CSV, JSON, HTML, MD, RTF, XLSX
+                  The file must contain Somali text. Supported files: PDF, DOC, DOCX, TXT, CSV, JSON, HTML, MD, RTF, XLSX
                 </p>
 
                 <input
@@ -422,7 +422,7 @@ export default function Analysis({ publicMode = false, embedded = false }) {
                     className="px-4 py-2 rounded-xl font-semibold border transition-colors"
                     style={tabStyle(batchType === "text")}
                   >
-                    Qoraal Batch
+                    Text Batch
                   </button>
 
                   <button
@@ -442,8 +442,8 @@ export default function Analysis({ publicMode = false, embedded = false }) {
                   rows="8"
                   placeholder={
                     batchType === "text"
-                      ? "Geli qoraallo Af Soomaali ah, mid saddexaadkiiba..."
-                      : "Geli URLs (bogag Af Soomaali), mid saddexaadkiiba..."
+                      ? "Enter Somali texts, one per line..."
+                      : "Enter Somali-language page URLs, one per line..."
                   }
                   className="w-full p-4 rounded-2xl border placeholder:opacity-50 focus:outline-none focus:ring-2 focus:ring-[var(--brand-ring)]"
                   style={fieldStyle}
@@ -461,7 +461,7 @@ export default function Analysis({ publicMode = false, embedded = false }) {
                     style={{ backgroundColor: "var(--brand)" }}
                   >
                     <LogIn size={16} />
-                    Samee akoon bilaash ah
+                    Create a free account
                   </Link>
                 )}
               </div>
@@ -469,15 +469,15 @@ export default function Analysis({ publicMode = false, embedded = false }) {
 
             {isGuest && !needsAccount && (
               <p className="mt-3 text-xs" style={{ color: "var(--text-muted)" }}>
-                Tijaabo bilaash: {Math.max(0, GUEST_FREE_LIMIT - getGuestUsage())} /{" "}
-                {GUEST_FREE_LIMIT} analysis ayaa kuu hadhay. Qoraalka martiga waa ugu
-                badnaan {GUEST_MAX_TEXT_LENGTH} xaraf. Luqad: Af Soomaali oo keliya.
+                Free trial: {Math.max(0, GUEST_FREE_LIMIT - getGuestUsage())} of{" "}
+                {GUEST_FREE_LIMIT} analyses remaining. Guest text is limited to{" "}
+                {GUEST_MAX_TEXT_LENGTH} characters. Language: Somali only.
               </p>
             )}
 
             <p className="mt-3 text-xs font-medium" style={{ color: "var(--brand)" }}>
-              Xeer: Qoraalka waa inuu ahaadaa Af Soomaali. Ingiriis iyo luqadaha kale
-              lama aqbalo.
+              Rule: The content must be in Somali. English and other languages are
+              not accepted.
             </p>
 
             <button
@@ -488,10 +488,10 @@ export default function Analysis({ publicMode = false, embedded = false }) {
               {loading ? (
                 <>
                   <Loader2 className="animate-spin" size={18} />
-                  Waa la falanqeeyaa...
+                  Analyzing...
                 </>
               ) : (
-                loadedFromHistory ? "Dib u falanqee" : "Falanqee"
+                loadedFromHistory ? "Analyze Again" : "Analyze"
               )}
             </button>
           </form>

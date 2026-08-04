@@ -39,7 +39,7 @@ export default function BareAIApp() {
     },
     {
       icon: BellRing,
-      title: "Priority Alerts",
+      title: "Real-time Alerts",
       text: "Surface blacklist matches and new activity so investigators can respond before context is lost.",
     },
     {

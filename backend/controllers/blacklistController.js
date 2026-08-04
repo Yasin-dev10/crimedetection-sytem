@@ -948,7 +948,6 @@ const getBlacklistStats = async (req, res) => {
         name: item.name,
         value: item.value,
         reason: item.reason,
-        priority: item.priority,
         active: item.active,
         createdAt: item.createdAt,
         totalMatches: totalCount,

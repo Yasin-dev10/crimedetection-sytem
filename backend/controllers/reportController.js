@@ -93,7 +93,6 @@ function normalizeBlacklistMatches(matches = []) {
     item: match.item,
     type: match.type || "blacklist",
     value: match.value || "",
-    priority: match.priority || "normal",
   }));
 }
 
@@ -160,7 +159,6 @@ function buildTopBlacklistMatches(records = []) {
           type: match.type || "blacklist",
           value,
           name: match.item?.name || null,
-          priority: match.priority || "normal",
           count: 0,
         };
       }
@@ -207,7 +205,7 @@ async function getOptionalBlacklistItem(blacklistId) {
     throw err;
   }
   const item = await BlacklistItem.findById(blacklistId)
-    .select("name type value priority active")
+    .select("name type value active")
     .lean();
   if (!item) {
     const err = new Error("Blacklist item not found");
@@ -464,7 +462,7 @@ exports.fakeCrimesReport = async (req, res) => {
         return res.status(400).json({ message: "Invalid blacklist id" });
       }
       blacklistItem = await BlacklistItem.findById(blacklistId)
-        .select("name type value reason priority active monitorEnabled")
+        .select("name type value reason active monitorEnabled")
         .lean();
       if (!blacklistItem) {
         return res.status(404).json({ message: "Blacklist item not found" });

@@ -5,7 +5,7 @@ const History = require("../model/History");
 // Pass ?source=facebook for Facebook-only, or ?source=all for everything.
 const getHistory = async (req, res) => {
   try {
-    const { crime, priority, search, source } = req.query;
+    const { crime, search, source } = req.query;
     const query = {};
 
     if (source === "facebook") {
@@ -16,10 +16,6 @@ const getHistory = async (req, res) => {
 
     if (crime === "CRIME") query.isCrime = true;
     if (crime === "SAFE") query.isCrime = false;
-
-    if (priority && priority !== "ALL") {
-      query.priority = priority;
-    }
 
     if (search) {
       const escapedSearch = search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -50,7 +46,6 @@ const getHistory = async (req, res) => {
       investigationStatus: h.investigationStatus || "pending",
 
       confidence: Number(h.confidence) || 0,
-      priority: h.priority,
 
       matchedKeyword: h.matchedKeyword,
 
@@ -58,7 +53,6 @@ const getHistory = async (req, res) => {
         name: b.item?.name || "Unknown",
         type: b.type,
         value: b.value,
-        priority: b.priority,
       })),
 
       location: h.location,

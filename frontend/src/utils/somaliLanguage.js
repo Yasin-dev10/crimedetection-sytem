@@ -13,6 +13,7 @@ const ENGLISH_STOPWORDS = new Set([
   "today", "police", "crime", "killed", "killing", "murder", "attack", "bomb",
   "shot", "stolen", "report", "happened", "someone", "something", "always",
   "never", "where", "why", "should", "must", "help", "find", "found", "call",
+  "useful", "skill", "skills",
 ]);
 
 const SOMALI_MARKERS = new Set([
@@ -30,8 +31,12 @@ const SOMALI_MARKERS = new Set([
 export const NUMBERS_NOT_ALLOWED_MESSAGE =
   "Qoraalku waa inuusan lahayn number ama tiro. Ka saar tirooyinka si analysis-ku u shaqeeyo.";
 
-export const SOMALI_ONLY_MESSAGE =
+const LEGACY_SOMALI_ONLY_MESSAGE =
   "Fadlan geli qoraal Af Soomaali ah oo keliya. Ingiriis iyo luqadaha kale lama aqbalo — analysis-ku ma shaqeynayo.";
+
+export const SOMALI_ONLY_MESSAGE =
+  "Fadlan geli qoraal Af Soomaali ah oo keliya. Ingiriis iyo luqadaha kale lama aqbalo; analysis-ku ma shaqeynayo.";
+void LEGACY_SOMALI_ONLY_MESSAGE;
 
 const tokenize = (text = "") => {
   const normalized = String(text)

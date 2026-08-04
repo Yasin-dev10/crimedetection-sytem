@@ -164,7 +164,6 @@ const buildFakeCrimeSubjects = async ({
           type: "$item.type",
           value: "$item.value",
           reason: "$item.reason",
-          priority: "$item.priority",
           active: "$item.active",
           monitorEnabled: "$item.monitorEnabled",
         },

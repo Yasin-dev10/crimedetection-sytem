@@ -30,6 +30,7 @@ ENGLISH_STOPWORDS = {
     "today", "police", "crime", "killed", "killing", "murder", "attack", "bomb",
     "shot", "stolen", "report", "happened", "someone", "something", "always",
     "never", "where", "why", "should", "must", "help", "find", "found", "call",
+    "useful", "skill", "skills",
 }
 
 SOMALI_MARKERS = {

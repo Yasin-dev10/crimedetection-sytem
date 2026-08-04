@@ -179,6 +179,9 @@ const ENGLISH_STOPWORDS = new Set([
   "found",
   "call",
   "called",
+  "useful",
+  "skill",
+  "skills",
 ]);
 
 const SOMALI_MARKERS = new Set([
@@ -337,8 +340,12 @@ const SOMALI_MARKERS = new Set([
 const NUMBERS_NOT_ALLOWED_MESSAGE =
   "Qoraalku waa inuusan lahayn number ama tiro. Ka saar tirooyinka si analysis-ku u shaqeeyo.";
 
-const SOMALI_ONLY_MESSAGE =
+const LEGACY_SOMALI_ONLY_MESSAGE =
   "Fadlan geli qoraal Af Soomaali ah oo keliya. Ingiriis iyo luqadaha kale lama aqbalo — analysis-ku ma shaqeynayo.";
+
+const SOMALI_ONLY_MESSAGE =
+  "Fadlan geli qoraal Af Soomaali ah oo keliya. Ingiriis iyo luqadaha kale lama aqbalo; analysis-ku ma shaqeynayo.";
+void LEGACY_SOMALI_ONLY_MESSAGE;
 
 const tokenize = (text = "") => {
   const normalized = String(text)

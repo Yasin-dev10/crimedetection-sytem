@@ -10,11 +10,6 @@ const blacklistItemSchema = new mongoose.Schema(
     name: { type: String, required: true },
     value: { type: String, required: true },
     reason: { type: String, default: "" },
-    priority: {
-      type: String,
-      enum: ["low", "medium", "high"],
-      default: "high",
-    },
     active: { type: Boolean, default: true },
     monitorEnabled: { type: Boolean, default: true },
     lastScannedAt: { type: Date, default: null },

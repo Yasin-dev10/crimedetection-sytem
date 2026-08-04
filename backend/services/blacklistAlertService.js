@@ -31,7 +31,7 @@ const fingerprint = (value = "") =>
     .update(normalizeAlertContent(value))
     .digest("hex");
 
-const sendCrimeAlertEmails = async ({ matchedValue, sourceType, priority, content }) => {
+const sendCrimeAlertEmails = async ({ matchedValue, sourceType, content }) => {
   try {
     const admins = await User.find({
       role: "admin",
@@ -47,14 +47,12 @@ const sendCrimeAlertEmails = async ({ matchedValue, sourceType, priority, conten
           message: `Crime-related content detected.
 Matched: ${matchedValue || "N/A"}
 Source: ${sourceType || "facebook"}
-Priority: ${priority || "high"}
 Content: ${String(content || "").slice(0, 1000)}`,
           html: `
             <h2>BAAREAI Crime Alert</h2>
             <p><b>Crime-related content detected.</b></p>
             <p><b>Matched:</b> ${escapeHtml(matchedValue || "N/A")}</p>
             <p><b>Source:</b> ${escapeHtml(sourceType || "facebook")}</p>
-            <p><b>Priority:</b> ${escapeHtml(priority || "high")}</p>
             <p><b>Content:</b></p>
             <p>${escapeHtml(String(content || "").slice(0, 1000))}</p>
           `,
@@ -72,7 +70,6 @@ const createDailyBlacklistAlert = async ({
   sourceType = "facebook",
   content,
   matchedValue,
-  priority = "high",
   status = "new",
   postId = null,
   dedupeContent = content,
@@ -113,7 +110,6 @@ const createDailyBlacklistAlert = async ({
     sourceType,
     content,
     matchedValue,
-    priority,
     status,
     postId,
     contentFingerprint,
@@ -125,7 +121,6 @@ const createDailyBlacklistAlert = async ({
   await sendCrimeAlertEmails({
     matchedValue,
     sourceType,
-    priority,
     content,
   });
 

@@ -185,10 +185,8 @@ const analyzeFacebookPost = async ({ item, post }) => {
           item: item._id,
           type: item.type,
           value: item.value,
-          priority: item.priority,
         },
       ],
-      priority: item.priority || "high",
     });
 
     await appendIncomingDataset(history);
@@ -202,7 +200,6 @@ const analyzeFacebookPost = async ({ item, post }) => {
         sourceType: "facebook",
         content: message,
         matchedValue: item.value,
-        priority: item.priority || "high",
         status: "new",
         postId,
         dedupeContent: stableValue,

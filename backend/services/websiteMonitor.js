@@ -541,10 +541,8 @@ const analyzeWebsitePage = async ({
           item: item._id,
           type: item.type,
           value: item.value,
-          priority: item.priority,
         },
       ],
-      priority: item.priority || "high",
     });
 
     await appendIncomingDataset(history);
@@ -565,7 +563,6 @@ const analyzeWebsitePage = async ({
       sourceType: "website",
       content: cleanText.slice(0, 1000),
       matchedValue: item.value,
-      priority: item.priority || "high",
       status: "new",
       postId,
       dedupeContent: `${item._id}_${normalizedUrl}_${textHash}`,

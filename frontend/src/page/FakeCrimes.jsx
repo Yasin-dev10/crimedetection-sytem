@@ -784,9 +784,6 @@ function SubjectCard({ row, threshold, expanded, onToggle }) {
             <Badge color={item.active ? "green" : "gray"}>
               {item.active ? "Active" : "Paused"}
             </Badge>
-            {item.priority && (
-              <Badge color="gray">Priority: {item.priority}</Badge>
-            )}
           </div>
 
           <p

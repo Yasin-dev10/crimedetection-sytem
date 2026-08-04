@@ -8,7 +8,6 @@ const blacklistMatchSchema = new mongoose.Schema(
     },
     type: String,
     value: String,
-    priority: String,
   },
   { _id: false }
 );
@@ -101,12 +100,6 @@ const historySchema = new mongoose.Schema(
     blacklistMatches: {
       type: [blacklistMatchSchema],
       default: [],
-    },
-
-    priority: {
-      type: String,
-      enum: ["low", "medium", "high", "normal"],
-      default: "normal",
     },
 
     status: {

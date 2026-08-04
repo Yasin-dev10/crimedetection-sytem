@@ -42,12 +42,6 @@ const blacklistAlertSchema = new mongoose.Schema(
       index: true,
     },
 
-    priority: {
-      type: String,
-      enum: ["low", "medium", "high"],
-      default: "high",
-    },
-
     status: {
       type: String,
       enum: ["new", "reviewed", "sent_to_investigation"],
