@@ -14,6 +14,7 @@ const ENGLISH_STOPWORDS = new Set([
   "shot", "stolen", "report", "happened", "someone", "something", "always",
   "never", "where", "why", "should", "must", "help", "find", "found", "call",
   "useful", "skill", "skills",
+  "analysis", "analys", "analyse", "analyze", "analysed", "analyzed",
 ]);
 
 const SOMALI_MARKERS = new Set([
@@ -35,7 +36,7 @@ const LEGACY_SOMALI_ONLY_MESSAGE =
   "Fadlan geli qoraal Af Soomaali ah oo keliya. Ingiriis iyo luqadaha kale lama aqbalo — analysis-ku ma shaqeynayo.";
 
 export const SOMALI_ONLY_MESSAGE =
-  "Fadlan geli qoraal Af Soomaali ah oo keliya. Ingiriis iyo luqadaha kale lama aqbalo; analysis-ku ma shaqeynayo.";
+  "Qoraalka waxaa ku jira eray English ah. Fadlan ka saar qoraalka English-ka si analysis-ku u shaqeeyo.";
 void LEGACY_SOMALI_ONLY_MESSAGE;
 
 const tokenize = (text = "") => {
@@ -83,9 +84,14 @@ export function assertSomaliOnly(rawText = "") {
   let englishHits = 0;
   let somaliHits = 0;
   let morphHits = 0;
+  const englishWords = [];
 
   for (const word of words) {
-    if (ENGLISH_STOPWORDS.has(word)) englishHits += 1;
+    // Words shared by both languages (for example "in") are Somali here.
+    if (ENGLISH_STOPWORDS.has(word) && !SOMALI_MARKERS.has(word)) {
+      englishHits += 1;
+      englishWords.push(word);
+    }
     if (SOMALI_MARKERS.has(word)) somaliHits += 1;
     if (looksSomaliMorphology(word)) morphHits += 1;
   }
@@ -93,6 +99,15 @@ export function assertSomaliOnly(rawText = "") {
   const somaliScore = somaliHits + morphHits * 0.5;
   const total = words.length;
   const englishRatio = englishHits / total;
+
+  // Mixed Somali/English input is not allowed: one clear English word is enough.
+  if (englishWords.length > 0) {
+    return {
+      ok: false,
+      message: SOMALI_ONLY_MESSAGE,
+      reason: "english_word_detected",
+    };
+  }
 
   if (englishHits >= 2 && englishRatio >= 0.2 && englishHits >= somaliHits) {
     return { ok: false, message: SOMALI_ONLY_MESSAGE };
