@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>BARE AI</title>
+
+    <!-- Theme init: apply before React loads to prevent flash -->
+    <script>
+      (function () {
+        try {
+          var stored = localStorage.getItem("theme");
+          if (!stored) {
+            try {
+              var u = JSON.parse(localStorage.getItem("user") || "null");
+              stored = u && u.theme;
+            } catch (e) {}
+          }
+          var theme = stored === "light" ? "light" : "dark";
+          document.documentElement.dataset.theme = theme;
+          document.documentElement.classList.add(theme);
+          document.documentElement.classList.remove(theme === "dark" ? "light" : "dark");
+        } catch (e) {}
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

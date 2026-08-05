@@ -45,6 +45,11 @@ const AUTH_COOKIE_OPTIONS = {
   path: "/",
 };
 
+const isLoginOTPEnabled = (() => {
+  const envValue = String(process.env.LOGIN_OTP_ENABLED || "true").trim().toLowerCase();
+  return envValue !== "false" && envValue !== "0";
+})();
+
 const setAuthCookie = (res, token) => {
   res.cookie("token", token, AUTH_COOKIE_OPTIONS);
 };
@@ -327,6 +332,31 @@ const login = async (req, res) => {
     ) {
       user.isPasswordChangeRequired = true;
       await user.save();
+    }
+
+    if (!isLoginOTPEnabled) {
+      const sessionId = generateSessionId();
+      user.activeSessionId = sessionId;
+      await user.save();
+
+      const token = generateToken(user, sessionId);
+      setAuthCookie(res, token);
+
+      await logActivity({
+        req,
+        user,
+        action: "login",
+        sessionId,
+        details: { method: "password" },
+      });
+
+      return res.json({
+        message: "Login successful",
+        user: buildUserResponse(user),
+        token,
+        emailVerified: user.emailVerified,
+        requiresOTP: false,
+      });
     }
 
     const loginOTP = generateOTPCode();

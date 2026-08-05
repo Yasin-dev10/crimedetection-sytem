@@ -43,7 +43,7 @@ const seedAdmin = async () => {
       emailVerified: true,
       emailVerificationOTP: null,
       emailVerificationOTPExpiry: null,
-      isPasswordChangeRequired: true,
+      isPasswordChangeRequired: false,
       activeSessionId: null,
     },
     {

@@ -1,10 +1,47 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import hashlib
+import json
 import os
 import re
+import subprocess
 from functools import wraps
 from pathlib import Path
+
+
+MODEL_DIR = Path(__file__).resolve().parent
+
+
+def run_transformer_in_wsl_when_needed() -> None:
+    """Delegate direct Windows launches to the Linux PyTorch runtime."""
+    if os.name != "nt" or __name__ != "__main__":
+        return
+
+    active_path = MODEL_DIR / "active_model.json"
+    if not active_path.is_file():
+        return
+
+    active_model = json.loads(active_path.read_text(encoding="utf-8"))
+    if active_model.get("backend") != "transformer":
+        return
+
+    launcher = MODEL_DIR / "start-somberta.ps1"
+    print("SomBERTa-B requires Linux PyTorch; starting it automatically in WSL...")
+    result = subprocess.run(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(launcher),
+        ],
+        check=False,
+    )
+    raise SystemExit(result.returncode)
+
+
+run_transformer_in_wsl_when_needed()
 
 from preprocessing import preprocess_text
 from crime_rules import find_explicit_crime_event, has_non_event_context
@@ -25,7 +62,6 @@ def load_env_file(path: Path) -> None:
         os.environ.setdefault(key, value)
 
 
-MODEL_DIR = Path(__file__).resolve().parent
 load_env_file(MODEL_DIR / ".env")
 load_env_file(MODEL_DIR.parent / "backend" / ".env")
 

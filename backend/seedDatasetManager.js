@@ -42,8 +42,8 @@ async function seedDatasetManager() {
       emailVerified: true,
       emailVerificationOTP: null,
       emailVerificationOTPExpiry: null,
-      isPasswordChangeRequired: true,
-      passwordChangedAt: null,
+      isPasswordChangeRequired: false,
+      passwordChangedAt: new Date(),
       activeSessionId: null,
     },
     {
