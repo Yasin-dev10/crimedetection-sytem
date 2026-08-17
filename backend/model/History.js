@@ -72,6 +72,11 @@ const historySchema = new mongoose.Schema(
       default: "not crime-related",
     },
 
+    label: {
+      type: String,
+      default: null,
+    },
+
     confidence: {
       type: Number,
       default: 0,

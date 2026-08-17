@@ -64,12 +64,12 @@ def _non_latin_ratio(text: str) -> float:
     return len(non_latin) / len(letters)
 
 
-def assert_somali_only(raw_text: str = "") -> dict:
+def assert_somali_only(raw_text: str = "", allow_numbers: bool = False) -> dict:
     text = str(raw_text or "").strip()
     if not text:
         return {"ok": False, "message": "Qoraalka waa loo baahan yahay.", "reason": "empty"}
 
-    if any(ch.isdigit() for ch in text):
+    if not allow_numbers and any(ch.isdigit() for ch in text):
         return {
             "ok": False,
             "message": NUMBERS_NOT_ALLOWED_MESSAGE,
@@ -87,7 +87,7 @@ def assert_somali_only(raw_text: str = "") -> dict:
     somali_hits = 0
     morph_hits = 0
     for word in words:
-        if word in ENGLISH_STOPWORDS:
+        if word in ENGLISH_STOPWORDS and word not in SOMALI_MARKERS:
             english_hits += 1
         if word in SOMALI_MARKERS:
             somali_hits += 1
@@ -97,6 +97,11 @@ def assert_somali_only(raw_text: str = "") -> dict:
     somali_score = somali_hits + morph_hits * 0.5
     total = len(words)
     english_ratio = english_hits / total
+
+    # Match the backend scanner rule: mixed Somali/English is rejected when a
+    # clear English-only token is present.
+    if english_hits > 0:
+        return {"ok": False, "message": SOMALI_ONLY_MESSAGE, "reason": "english_word_detected"}
 
     if english_hits >= 2 and english_ratio >= 0.2 and english_hits >= somali_hits:
         return {"ok": False, "message": SOMALI_ONLY_MESSAGE, "reason": "english_majority"}

@@ -1553,7 +1553,7 @@ function HistoryMatchCard({ history }) {
           {history.sourceType || history.type || "history"}
         </span>
         <span className="ml-auto text-xs" style={{ color: "var(--text-muted)" }}>
-          {formatDate(history.createdAt)}
+          {formatDate(history.publishedAt || history.createdAt)}
         </span>
       </div>
 
@@ -1563,6 +1563,11 @@ function HistoryMatchCard({ history }) {
       >
         {history.content}
       </p>
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 8 }}>
+        <span>Prediction: {history.prediction || "Not provided"}</span>
+        <span>Label: {history.label || history.prediction || "Not provided"}</span>
+        <span>Confidence: {Number(history.confidence || 0).toFixed(1)}%</span>
+      </div>
 
       {history.url && (
         <div className="mt-3.5 flex items-center">

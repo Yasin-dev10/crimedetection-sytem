@@ -259,7 +259,10 @@ def predict():
     if not text or not text.strip():
         return jsonify({"message": "Qoraalka waa loo baahan yahay."}), 400
 
-    language_check = assert_somali_only(text)
+    language_check = assert_somali_only(
+        text,
+        allow_numbers=bool(data.get("allowNumbers", False)),
+    )
     if not language_check.get("ok"):
         return jsonify({
             "message": language_check.get("message"),

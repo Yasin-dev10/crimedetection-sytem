@@ -12,12 +12,12 @@ import API from "../api";
 import { getStoredUser } from "../theme";
 import { renderCrimeHighlightedText } from "../utils/crimeHighlight";
 
-const CURRENT_YEAR = new Date().getFullYear();
-const YEARS = Array.from({ length: 7 }, (_, index) => CURRENT_YEAR - index);
-const MONTHS = Array.from({ length: 12 }, (_, index) => ({
-  value: index + 1,
-  label: new Date(2000, index, 1).toLocaleString("en-US", { month: "long" }),
-}));
+const PERIODS = [
+  { value: "", label: "All time" },
+  { value: "week", label: "Last week" },
+  { value: "month", label: "Last month" },
+  { value: "year", label: "Last year" },
+];
 
 export default function FacebookPosts() {
   const { id } = useParams();
@@ -35,16 +35,14 @@ export default function FacebookPosts() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [sendingId, setSendingId] = useState("");
-  const [selectedYear, setSelectedYear] = useState("");
-  const [selectedMonth, setSelectedMonth] = useState("");
+  const [selectedPeriod, setSelectedPeriod] = useState("");
 
   const loadPosts = async () => {
     try {
       setLoading(true);
       setError("");
       const params = new URLSearchParams();
-      if (selectedYear) params.set("year", selectedYear);
-      if (selectedYear && selectedMonth) params.set("month", selectedMonth);
+      if (selectedPeriod) params.set("period", selectedPeriod);
       const query = params.toString();
       const res = await API.get(
         `/blacklist/facebook/${id}/posts${query ? `?${query}` : ""}`
@@ -63,7 +61,7 @@ export default function FacebookPosts() {
 
   useEffect(() => {
     loadPosts();
-  }, [id, selectedYear, selectedMonth]);
+  }, [id, selectedPeriod]);
 
   const sendToCase = async (post) => {
     if (!post?._id || sendingId) return;
@@ -158,45 +156,23 @@ export default function FacebookPosts() {
         <div className="mt-6 flex flex-wrap items-end gap-3 rounded-2xl border border-slate-800 bg-slate-900 p-4">
           <div>
             <label className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-400">
-              Year
+              Published
             </label>
             <select
-              value={selectedYear}
-              onChange={(event) => {
-                setSelectedYear(event.target.value);
-                if (!event.target.value) setSelectedMonth("");
-              }}
+              value={selectedPeriod}
+              onChange={(event) => setSelectedPeriod(event.target.value)}
+              aria-label="Filter posts by publication period"
               className="rounded-xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-100"
             >
-              <option value="">All years</option>
-              {YEARS.map((year) => (
-                <option key={year} value={year}>{year}</option>
+              {PERIODS.map((period) => (
+                <option key={period.value} value={period.value}>{period.label}</option>
               ))}
             </select>
           </div>
-          <div>
-            <label className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-400">
-              Month
-            </label>
-            <select
-              value={selectedMonth}
-              onChange={(event) => setSelectedMonth(event.target.value)}
-              disabled={!selectedYear}
-              className="rounded-xl border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <option value="">All months</option>
-              {MONTHS.map((month) => (
-                <option key={month.value} value={month.value}>{month.label}</option>
-              ))}
-            </select>
-          </div>
-          {(selectedYear || selectedMonth) && (
+          {selectedPeriod && (
             <button
               type="button"
-              onClick={() => {
-                setSelectedYear("");
-                setSelectedMonth("");
-              }}
+              onClick={() => setSelectedPeriod("")}
               className="rounded-xl border border-slate-700 px-3 py-2 text-sm font-bold text-slate-300 hover:bg-slate-800"
             >
               Clear filter
@@ -215,10 +191,15 @@ export default function FacebookPosts() {
         ) : (data.posts || []).length === 0 ? (
           <div className="rounded-2xl border border-slate-800 bg-slate-900 p-10 text-center">
             <ShieldAlert className="mx-auto mb-3 text-slate-500" size={36} />
-            <p className="font-bold">No posts scanned yet</p>
+            <p className="font-bold">
+              {selectedPeriod
+                ? `No posts found in the last ${selectedPeriod}`
+                : "No posts scanned yet"}
+            </p>
             <p className="mt-2 text-sm text-slate-400">
-              Scan this Facebook page from Blacklist, then crime posts appear in
-              Notifications.
+              {selectedPeriod
+                ? "Try a wider publication range or scan this Facebook page again."
+                : "Scan this Facebook page from Blacklist, then crime posts appear in Notifications."}
             </p>
           </div>
         ) : (
@@ -243,12 +224,15 @@ export default function FacebookPosts() {
                     <Badge color={post.isCrime ? "red" : "green"}>
                       {post.isCrime ? "CRIME" : "NOT CRIME"}
                     </Badge>
+                    <Badge color="cyan">
+                      {post.label || post.prediction || "No label"}
+                    </Badge>
                     <Badge color="cyan">{post.confidence || 0}%</Badge>
                     {alreadySent && (
                       <Badge color="cyan">Sent to Case</Badge>
                     )}
                     <span className="text-xs text-slate-500">
-                      {new Date(post.createdAt).toLocaleString()}
+                      {new Date(post.publishedAt || post.createdAt).toLocaleString()}
                     </span>
                   </div>
 

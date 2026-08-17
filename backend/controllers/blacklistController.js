@@ -28,6 +28,9 @@ const {
   buildFakeCrimeSubjects,
 } = require("../services/fakeCrimeReportService");
 const { logActivity } = require("../utils/activityLogger");
+const {
+  buildFacebookPostDateFilter,
+} = require("../utils/facebookPostDateFilter");
 
 const getScanPeriodOptions = (value) => {
   const period = ["week", "month", "year"].includes(value) ? value : "week";
@@ -61,34 +64,6 @@ const escapeRegex = (value = "") =>
   String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 const isUrl = (value = "") => /^https?:\/\//i.test(String(value).trim());
-
-const buildScanDateFilter = (query = {}) => {
-  const rawYear = String(query.year || "").trim();
-  const rawMonth = String(query.month || "").trim();
-  if (!rawYear && !rawMonth) return {};
-
-  const year = Number.parseInt(rawYear, 10);
-  const month = rawMonth ? Number.parseInt(rawMonth, 10) : null;
-  const currentYear = new Date().getFullYear();
-
-  if (!Number.isInteger(year) || year < 2000 || year > currentYear) {
-    const error = new Error(`Year must be between 2000 and ${currentYear}.`);
-    error.status = 400;
-    throw error;
-  }
-  if (month !== null && (!Number.isInteger(month) || month < 1 || month > 12)) {
-    const error = new Error("Month must be between 1 and 12.");
-    error.status = 400;
-    throw error;
-  }
-
-  const start = month ? new Date(year, month - 1, 1) : new Date(year, 0, 1);
-  const end = month
-    ? new Date(year, month, 0, 23, 59, 59, 999)
-    : new Date(year, 11, 31, 23, 59, 59, 999);
-
-  return { createdAt: { $gte: start, $lte: end } };
-};
 
 const cleanProfileName = (value = "") =>
   String(value)
@@ -449,13 +424,13 @@ const getFacebookPagePosts = async (req, res) => {
       });
     }
 
-    const dateFilter = buildScanDateFilter(req.query);
+    const dateFilter = buildFacebookPostDateFilter(req.query);
     const posts = await History.find({
       "blacklistMatches.item": item._id,
       sourceType: "facebook",
       ...dateFilter,
     })
-      .sort({ createdAt: -1 })
+      .sort({ publishedAt: -1, createdAt: -1 })
       .limit(200);
 
     const totalPosts = posts.length;

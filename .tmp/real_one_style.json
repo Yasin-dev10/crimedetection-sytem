@@ -1,0 +1,171 @@
+{
+  "input": "C:\\Users\\yasin\\Downloads\\THE REAL ONE-6.docx",
+  "fonts_by_char_count": {
+    "Calibri": 238,
+    "Arial": 4
+  },
+  "direct_run_formatting_runs": 453,
+  "direct_paragraph_formatting_paragraphs": 1566,
+  "heading_like_paragraphs_not_heading_style": [
+    {
+      "para_index": 1,
+      "text": "A CENTRALIZED CLEANLINESS REPORTING AND ",
+      "style": "Normal"
+    },
+    {
+      "para_index": 2,
+      "text": "TASK ASSIGNMENT SYSTEM FOR MUNICIPAL ",
+      "style": "Normal"
+    },
+    {
+      "para_index": 3,
+      "text": "SANITATION TEAMS IN MOGADISHU ",
+      "style": "Normal"
+    },
+    {
+      "para_index": 6,
+      "text": "NORADIN YUSSUF ALI ",
+      "style": "Normal"
+    },
+    {
+      "para_index": 7,
+      "text": "MOHAMED BASHIR ABSHIR ",
+      "style": "Normal"
+    },
+    {
+      "para_index": 8,
+      "text": "ABDIQAFAR MOHAMED WARSAME ",
+      "style": "Normal"
+    },
+    {
+      "para_index": 9,
+      "text": "SAID SAED MOHAMED ",
+      "style": "Normal"
+    },
+    {
+      "para_index": 11,
+      "text": "SUBMISSION OF GRADUATION PROJECT FOR  ",
+      "style": "Normal"
+    },
+    {
+      "para_index": 12,
+      "text": "PARTIAL FULFILLMENT OF THE  ",
+      "style": "Normal"
+    },
+    {
+      "para_index": 13,
+      "text": "DEGREE OF BACHELOR OF SCIENCE IN  ",
+      "style": "Normal"
+    },
+    {
+      "para_index": 14,
+      "text": "COMPUTER APPLICATIONS ",
+      "style": "Normal"
+    },
+    {
+      "para_index": 16,
+      "text": "JAMHURIYA UNIVERSITY OF SCIENCE AND TECHNOLOGY (JUST)  ",
+      "style": "Normal"
+    },
+    {
+      "para_index": 17,
+      "text": "FACULTY OF COMPUTER & INFORMATION  ",
+      "style": "Normal"
+    },
+    {
+      "para_index": 18,
+      "text": "TECHNOLOGY  ",
+      "style": "Normal"
+    },
+    {
+      "para_index": 22,
+      "text": "AUGUST 2026  ",
+      "style": "Normal"
+    },
+    {
+      "para_index": 28,
+      "text": "DECLARATION  ",
+      "style": "Normal"
+    },
+    {
+      "para_index": 29,
+      "text": "JAMHRURIYA UNIVERSITY OF SCIENCE AN TECHNOLOGY (JUST) ORIGINAL LITERARY WORK  ",
+      "style": "Normal"
+    },
+    {
+      "para_index": 33,
+      "text": "Name of Degree: Bachelor Degree of Computer ",
+      "style": "Normal"
+    },
+    {
+      "para_index": 36,
+      "text": "Field of Study: Computer Applications ",
+      "style": "Normal"
+    },
+    {
+      "para_index": 52,
+      "text": "ABSTRACT ",
+      "style": "Normal"
+    }
+  ],
+  "examples": {
+    "direct_paragraph_formatting": [
+      {
+        "para_index": 1,
+        "text": "A CENTRALIZED CLEANLINESS REPORTING AND ",
+        "style": "Normal"
+      },
+      {
+        "para_index": 2,
+        "text": "TASK ASSIGNMENT SYSTEM FOR MUNICIPAL ",
+        "style": "Normal"
+      },
+      {
+        "para_index": 3,
+        "text": "SANITATION TEAMS IN MOGADISHU ",
+        "style": "Normal"
+      },
+      {
+        "para_index": 4,
+        "text": " ",
+        "style": "Normal"
+      },
+      {
+        "para_index": 5,
+        "text": " ",
+        "style": "Normal"
+      }
+    ],
+    "direct_run_formatting": [
+      {
+        "para_index": 1,
+        "run_text": "A CENTRALIZED CLEANLINESS REPORTING AND ",
+        "style": "Normal"
+      },
+      {
+        "para_index": 2,
+        "run_text": "TASK ASSIGNMENT SYSTEM FOR MUNICIPAL ",
+        "style": "Normal"
+      },
+      {
+        "para_index": 3,
+        "run_text": "SANITATION TEAMS IN MOGADISHU ",
+        "style": "Normal"
+      },
+      {
+        "para_index": 6,
+        "run_text": "NORADIN YUSSUF ALI",
+        "style": "Normal"
+      },
+      {
+        "para_index": 6,
+        "run_text": " ",
+        "style": "Normal"
+      }
+    ]
+  },
+  "notes": [
+    "Direct formatting is not always wrong, but it often causes inconsistent output when templates change.",
+    "Heading-like paragraphs not using Heading styles can break TOC and accessibility."
+  ]
+}

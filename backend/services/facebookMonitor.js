@@ -9,6 +9,7 @@ const { createDailyBlacklistAlert } = require("./blacklistAlertService");
 const { dispatchCrimeDetection } = require("./crimeDetectionService");
 const { appendIncomingDataset } = require("./datasetStore");
 const { AI_MODEL_URL, aiModelRequestConfig } = require("../config/aiModel");
+const { assertSomaliOnly } = require("../utils/somaliLanguage");
 
 const CHROME_PATH = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
 
@@ -165,6 +166,17 @@ const analyzeFacebookPost = async ({ item, post }) => {
 
     if (!message.trim()) return null;
 
+    const languageCheck = assertSomaliOnly(message, { allowNumbers: true });
+    if (!languageCheck.ok) {
+      return {
+        history: null,
+        alertCreated: false,
+        skippedLanguage: true,
+        languageReason: languageCheck.reason,
+        languageMessage: languageCheck.message,
+      };
+    }
+
     const stableText = makeStablePostText(message).slice(0, 250);
     if (!stableText || stableText.length < 20) return null;
 
@@ -184,7 +196,7 @@ const analyzeFacebookPost = async ({ item, post }) => {
     try {
       const res = await axios.post(
         AI_MODEL_URL,
-        { text: message },
+        { text: message, allowNumbers: true },
         aiModelRequestConfig({ timeout: 10000 })
       );
 
@@ -221,6 +233,12 @@ const analyzeFacebookPost = async ({ item, post }) => {
       authorName,
       pageName,
       prediction: finalPrediction,
+      label:
+        aiResult.modelPrediction ||
+        aiResult.rawPrediction ||
+        aiResult.label ||
+        aiResult.prediction ||
+        finalPrediction,
       confidence: finalConfidence,
       isCrime,
       matchedKeyword: aiResult.matchedKeyword || aiResult.matched_keyword || keywordResult.matchedKeyword,
@@ -548,20 +566,23 @@ const scanFacebookItem = async (item, options = {}) => {
 
     let scanned = periodPosts.length;
     let alerts = 0;
+    let skippedLanguage = 0;
 
     for (const post of periodPosts) {
       const result = await analyzeFacebookPost({ item, post });
       if (result?.alertCreated) alerts += 1;
+      if (result?.skippedLanguage) skippedLanguage += 1;
     }
 
     await BlacklistItem.findByIdAndUpdate(item._id, {
       lastScannedAt: new Date(),
-      lastScanStatus: `scanned ${scanned} (${options.period || "current"}), alerts ${alerts}`,
+      lastScanStatus: `scanned ${scanned} (${options.period || "current"}), language rejected ${skippedLanguage}, alerts ${alerts}`,
     });
 
     return {
       scanned,
       alerts,
+      skippedLanguage,
       skippedOutsidePeriod: posts.length - periodPosts.length,
       period: options.period || null,
       since,
@@ -658,4 +679,5 @@ module.exports = {
   getFacebookPageHandle,
   fetchFacebookGraphPosts,
   scrapeFacebookPosts,
+  analyzeFacebookPost,
 };

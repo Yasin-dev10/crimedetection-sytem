@@ -656,6 +656,7 @@ function AssignedCaseDetails({
         <Info label="Source Type" value={history.sourceType || history.type || "record"} />
         <Info label="Status" value={formatStatus(item.status)} />
         <Info label="Prediction" value={history.prediction || "Not provided"} />
+        <Info label="Classifier Label" value={history.label || history.prediction || "Not provided"} />
         <Info label="Investigator Verdict" value={verdictLabel} />
         <Info
           label="Confidence"
@@ -666,6 +667,7 @@ function AssignedCaseDetails({
           }
         />
         <Info label="Notified" value={formatDate(record.createdAt)} />
+        <Info label="Published" value={formatDate(history.publishedAt)} />
         <Info label="Case Time" value={formatDate(item.createdAt)} />
       </div>
 
@@ -686,6 +688,17 @@ function AssignedCaseDetails({
       </div>
 
       <div className="mt-5 flex flex-wrap gap-3">
+        {history.url && (
+          <a
+            href={history.url}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-2 bg-slate-800 text-cyan-300 border border-slate-700 font-bold px-4 py-2 rounded-xl text-sm hover:bg-slate-700"
+          >
+            <Eye size={16} />
+            View Source
+          </a>
+        )}
         {isAvailable && !isHistory && (
           <button
             type="button"
@@ -819,6 +832,7 @@ function AdminNotificationDetails({
         <Info label="Source Type" value={history.sourceType || history.type || "analysis"} />
         <Info label="Case Status" value={formatStatus(item.status) || "Pending"} />
         <Info label="Prediction" value={history.prediction || "CRIME-RELATED"} />
+        <Info label="Classifier Label" value={history.label || history.prediction || "CRIME-RELATED"} />
         <Info
           label="Confidence"
           value={
@@ -828,6 +842,7 @@ function AdminNotificationDetails({
           }
         />
         <Info label="Detected Time" value={formatDate(record.createdAt)} />
+        <Info label="Published" value={formatDate(history.publishedAt)} />
       </div>
 
       <div className="bg-slate-950 border border-slate-800 rounded-xl p-5">
@@ -851,6 +866,17 @@ function AdminNotificationDetails({
       </div>
 
       <div className="mt-5 flex flex-wrap gap-3">
+        {history.url && (
+          <a
+            href={history.url}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-2 bg-slate-800 text-cyan-300 border border-slate-700 font-bold px-4 py-2 rounded-xl text-sm hover:bg-slate-700"
+          >
+            <Eye size={16} />
+            View Source
+          </a>
+        )}
         {!isHistory && item._id && (
           <button
             type="button"

@@ -450,7 +450,7 @@ const runCrimePrediction = async (text) => {
   try {
     const res = await axios.post(
       AI_MODEL_URL,
-      { text },
+      { text, allowNumbers: true },
       aiModelRequestConfig({ timeout: 10000 })
     );
     aiResult = res.data || {};
@@ -474,6 +474,12 @@ const runCrimePrediction = async (text) => {
   return {
     isCrime,
     prediction: isCrime ? "CRIME-RELATED" : "NOT CRIME",
+    label:
+      aiResult.modelPrediction ||
+      aiResult.rawPrediction ||
+      aiResult.label ||
+      aiResult.prediction ||
+      (isCrime ? "CRIME-RELATED" : "NOT CRIME"),
     confidence:
       aiResult.confidence || (usedAiFallback ? keywordResult.confidence : 50) || 50,
     matchedKeyword:
@@ -560,6 +566,7 @@ const analyzeWebsitePage = async ({
       publishedAt: publishedAt || null,
       pageName: item.name,
       prediction: verdict.prediction,
+      label: verdict.label,
       confidence: verdict.confidence,
       isCrime: verdict.isCrime,
       matchedKeyword: verdict.matchedKeyword,
